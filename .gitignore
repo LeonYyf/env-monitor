@@ -42,3 +42,4 @@ data/
 .Rhistory
 .agents/
 .claude/
+skills-lock.json
