@@ -1,34 +1,24 @@
-# 让 matplotlib 图表跟随容器尺寸缩放，始终填满可用空间，避免在窄窗口 / Windows 下被裁切。
+#让 matplotlib 图表在 Qt 中保持原始宽高比，避免被垂直拉伸变形。
 from PySide6.QtWidgets import QSizePolicy
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 
-class AdaptiveCanvas(FigureCanvas):
+class FixedAspectCanvas(FigureCanvas):
 
     def __init__(self, fig, min_height: int = 200):
         super().__init__(fig)
+        w = float(fig.get_figwidth())
+        h = float(fig.get_figheight())
+        self._aspect = w / h if h > 0 else 1.6
         self._min_height = min_height
-        self._last_w = -1
-        self._last_h = -1
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumHeight(min_height)
-        self.setMinimumWidth(320)
 
     def resizeEvent(self, event):
-        # 先交给父类，让 Qt 把新尺寸写入控件，再同步 figure 尺寸。
+        #按宽度锁定高度，保持宽高比，避免图表被垂直拉伸
+        width = event.size().width()
+        if width > 0:
+            target_h = max(int(round(width / self._aspect)), self._min_height)
+            if target_h != self.height():
+                self.setFixedHeight(target_h)
         super().resizeEvent(event)
-        self._sync_figure_size()
-
-    def _sync_figure_size(self):
-        w = self.width()
-        h = self.height()
-        if w <= 0 or h <= 0:
-            return
-        # 尺寸变化小于阈值就跳过：拖拽窗口时 Qt 会连发大量只差 1~2 像素的
-        # resize 事件，逐个完整重绘既卡顿也无必要；只有实际变了才重绘。
-        if abs(w - self._last_w) < 8 and abs(h - self._last_h) < 8:
-            return
-        self._last_w, self._last_h = w, h
-        dpi = self.figure.get_dpi()
-        self.figure.set_size_inches(w / dpi, h / dpi)
-        self.draw_idle()
