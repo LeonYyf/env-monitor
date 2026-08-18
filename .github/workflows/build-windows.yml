@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:   # 也可在 GitHub 网页上手动点「Run workflow」
 
+# 允许工作流里的 GITHUB_TOKEN 写 Release（上传 exe 资产用）
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -28,3 +32,10 @@ jobs:
         with:
           name: EnvMonitor-windows
           path: dist/EnvMonitor.exe
+
+      # 直接从 GitHub 的 CI 服务器把 exe 挂到 Release v1.0.0，
+      # 避免在本地网络上传大文件时被「Connection reset」中断。
+      - name: 发布到 Release v1.0.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload v1.0.0 dist/EnvMonitor.exe --clobber

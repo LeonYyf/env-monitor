@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import seaborn as sns
 
 import config
@@ -541,13 +542,23 @@ class EDAPage(QWidget):
         #一个房间内各所选变量随时间的变化趋势
         fig, ax = plt.subplots(figsize=(11, 6), dpi=100, constrained_layout=True)
         for ind in indicators:
-            ax.plot(wide.index, wide[ind],
+            series = wide[ind]
+            ax.plot(wide.index, series,
                     marker="o", markersize=3, linewidth=1.5, label=ind)
+            #在每个点上标注具体数值：各月数值相差大时，低值会被高值压到底部，
+            #不标数字很难看清每个月的检测结果
+            for d, v in series.dropna().items():
+                ax.annotate(f"{v:,.0f}", (d, v), textcoords="offset points",
+                            xytext=(0, 6), ha="center", fontsize=8, color="#57534E")
         ax.set_xlabel("日期", labelpad=12)
         ax.set_ylabel("数值")
         ax.set_title(f"{room} · 时间序列趋势", fontsize=14, fontweight="bold")
         ax.legend()
         ax.grid(True, alpha=0.3)
+        #检测日期不多时逐个标出，确保每个检测月份（含最晚的月份）都清晰可见
+        if len(wide.index) <= 12:
+            ax.set_xticks(wide.index)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
         plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
         return fig
 
