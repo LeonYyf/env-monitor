@@ -121,8 +121,9 @@ class CleaningPipeline:
                     "outlier_table": outlier_info, "outlier_count": int(total_outliers)}
 
         elif step_key == "timeformat":
+            # 优先按列名识别时间列（record_date 等），不依赖 dtype；
+            # 内存数据里 record_date 已是 datetime，按 dtype 会漏判并误伤文本列。
             time_cols = [c for c in self.df.columns if
-                         self.df[c].dtype == object and
                          any(kw in c.lower() for kw in ["time", "date", "时间", "日期"])]
             if not time_cols:
                 time_cols = [c for c in self.df.columns if self.df[c].dtype == object]

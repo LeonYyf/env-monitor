@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QColor
 
-from src.database.repository import Repository
+from src.data_store import data_store
 from src.cleaning.pipeline import CleaningPipeline
 
 
@@ -84,7 +84,7 @@ class CleaningPage(QWidget):
         title.setObjectName("pageTitle")
         layout.addWidget(title)
 
-        desc = QLabel("从数据库加载测量数据，按 4 个步骤向导式清洗：缺失值 / 异常值 / 时间格式 / 去重。")
+        desc = QLabel("使用上一步导入的数据，按 4 个步骤向导式清洗：缺失值 / 异常值 / 时间格式 / 去重。")
         desc.setObjectName("pageDescription")
         layout.addWidget(desc)
 
@@ -114,7 +114,7 @@ class CleaningPage(QWidget):
         #数据加载
         load_group = QGroupBox("加载数据")
         load_layout = QHBoxLayout(load_group)
-        load_layout.addWidget(QLabel("从数据库加载测量数据以供清洗："))
+        load_layout.addWidget(QLabel("使用已导入的数据进行清洗："))
         self.load_btn = QPushButton("加载数据")
         self.load_btn.setObjectName("secondaryBtn")
         self.load_btn.clicked.connect(self._load_data)
@@ -229,14 +229,14 @@ class CleaningPage(QWidget):
     #数据加载
     def _load_data(self):
         try:
-            self.original_df = Repository.get_all_measurements()
-            if self.original_df.empty:
-                QMessageBox.warning(self, "提示", "数据库中暂无数据，请先完成「数据导入」步骤。")
+            df = data_store.get_for_cleaning()
+            if df is None or df.empty:
+                QMessageBox.warning(self, "提示", "暂无可清洗数据，请先完成「数据导入」步骤。")
                 return
 
-            #移除非数据列
+            # 移除可能的非数据列（内存数据里通常没有，属兜底）
             skip_cols = ["id", "import_session_id", "extended_data", "created_at"]
-            df = self.original_df.drop(columns=[c for c in skip_cols if c in self.original_df.columns], errors="ignore")
+            df = df.drop(columns=[c for c in skip_cols if c in df.columns], errors="ignore")
             self.original_df = df
 
             self.pipeline = CleaningPipeline(df)
@@ -256,7 +256,12 @@ class CleaningPage(QWidget):
             self._log("数据加载完成，请开始选择清洗方法。")
 
         except Exception as e:
-            QMessageBox.critical(self, "加载失败", f"从数据库加载数据时出错：{e}")
+            QMessageBox.critical(self, "加载失败", f"加载数据时出错：{e}")
+
+    def load_from_store(self):
+        #页面切换进入时自动加载；已加载或无数据时静默跳过
+        if self.original_df is None and data_store.get_for_cleaning() is not None:
+            self._load_data()
 
     def reset(self):
         #清空已加载的数据与清洗状态
@@ -449,6 +454,7 @@ class CleaningPage(QWidget):
     def _finish_cleaning(self):
         #清洗全部完成：标记步骤完成、解锁侧边栏
         self.cleaned_df = self.pipeline.df
+        data_store.set_cleaned(self.cleaned_df)
         self._cleaning_done = True
         self.apply_btn.setEnabled(False)
         self.next_btn.setText("进入探索分析")

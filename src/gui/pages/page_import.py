@@ -14,6 +14,7 @@ from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from src.etl.excel_reader import ExcelReader
 from src.etl.importer import Importer
 from src.database.repository import Repository
+from src.data_store import data_store
 
 
 def human_size(n: int) -> str:
@@ -378,12 +379,29 @@ class ImportPage(QWidget):
         v.addWidget(label)
         return tile
 
+    def _build_combined_df(self):
+        #把已解析的所有 sheet 拼成一个长表，并补上 sheet_name 列，
+        #供清洗 / 分析 / 报告直接使用（无需再从数据库重复查询）。
+        frames = []
+        for _, sheets in self.parsed_files:
+            for sheet_name, df in sheets.items():
+                if df is None or df.empty:
+                    continue
+                d = df.copy()
+                d["sheet_name"] = sheet_name
+                frames.append(d)
+        if not frames:
+            return None
+        combined = pd.concat(frames, ignore_index=True)
+        col_order = ["sheet_name", "record_date", "room_name", "room_adjacent",
+                     "particle_size", "indicator_name", "indicator_cn", "value", "unit"]
+        return combined[[c for c in col_order if c in combined.columns]]
+
     def _compute_overview(self):
         #从已解析的数据汇总出概览指标
-        dfs = [df for _, sheets in self.parsed_files for df in sheets.values() if not df.empty]
-        if not dfs:
+        combined = self._build_combined_df()
+        if combined is None or combined.empty:
             return None
-        combined = pd.concat(dfs, ignore_index=True)
         dmin = combined["record_date"].min()
         dmax = combined["record_date"].max()
         dmin_s = dmin.strftime("%Y-%m-%d") if hasattr(dmin, "strftime") else str(dmin)
@@ -671,7 +689,21 @@ class ImportPage(QWidget):
             self._populate_overview()
             if hasattr(self, "main_window") and self.main_window:
                 self.main_window.mark_step_completed(0)
-            QMessageBox.information(self, "导入完成", message)
+
+            #把导入的数据写入共享内存，供清洗/分析/报告直接使用
+            data_store.set_imported(self._build_combined_df())
+
+            #询问是否直接进入数据清洗：是→跳转（自动加载）；否→留在本页重新导入
+            reply = QMessageBox.question(
+                self, "导入完成",
+                f"{message}\n\n是否直接进入「数据清洗」？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                if hasattr(self, "main_window") and self.main_window:
+                    self.main_window.switch_to_page(1)
+            else:
+                self._set_import_state("ready")
         else:
             #导入失败：按钮回到就绪态，可重试
             self._set_import_state("ready")

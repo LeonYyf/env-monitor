@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
 
 import config
-from src.database.repository import Repository
+from src.data_store import data_store
 from src.reporting.analysis import (
     compute_compliance, compute_room_volume, VOLUME_DEVIATION_RATIO,
 )
@@ -154,9 +154,9 @@ class ReportingPage(QWidget):
     # 数据加载
     def _load_data(self):
         try:
-            df = Repository.get_all_measurements()
-            if df.empty:
-                QMessageBox.warning(self, "提示", "数据库中暂无数据，请先完成「数据导入」。")
+            df = data_store.get_for_analysis()
+            if df is None or df.empty:
+                QMessageBox.warning(self, "提示", "暂无可分析数据，请先完成「数据导入」与「数据清洗」。")
                 return
 
             skip = ["id", "import_session_id", "extended_data", "created_at"]
@@ -176,6 +176,11 @@ class ReportingPage(QWidget):
             self.gen_btn.setEnabled(True)
         except Exception as e:
             QMessageBox.critical(self, "加载失败", str(e))
+
+    def load_from_store(self):
+        #页面切换进入时自动加载；已加载或无数据时静默跳过
+        if self.df is None and data_store.get_for_analysis() is not None:
+            self._load_data()
 
     #生成报告
     def _generate_report(self):

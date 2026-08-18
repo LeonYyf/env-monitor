@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from src.gui.chart_canvas import FixedAspectCanvas
-from src.database.repository import Repository
+from src.gui.chart_canvas import AdaptiveCanvas
+from src.data_store import data_store
 
 # 设置中文字体
 plt.rcParams["font.family"] = config.VIZ_DEFAULTS["font_family"]
@@ -190,9 +190,9 @@ class EDAPage(QWidget):
     # 数据加载
     def _load_data(self):
         try:
-            df = Repository.get_all_measurements()
-            if df.empty:
-                QMessageBox.warning(self, "提示", "数据库中暂无数据，请先完成「数据导入」。")
+            df = data_store.get_for_analysis()
+            if df is None or df.empty:
+                QMessageBox.warning(self, "提示", "暂无可分析数据，请先完成「数据导入」与「数据清洗」。")
                 return
 
             skip = ["id", "import_session_id", "extended_data", "created_at"]
@@ -228,6 +228,11 @@ class EDAPage(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "加载失败", str(e))
+
+    def load_from_store(self):
+        #页面切换进入时自动加载；已加载或无数据时静默跳过
+        if self.df_all is None and data_store.get_for_analysis() is not None:
+            self._load_data()
 
     def _populate_variables(self):
         while self.checkbox_layout.count():
@@ -461,7 +466,7 @@ class EDAPage(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "生成失败", f"生成图表时出错：{e}")
                 return
-            self._show_tab(FixedAspectCanvas(fig), room)
+            self._show_tab(AdaptiveCanvas(fig), room)
             self._chart_generated = True
             self.result_hint.setText(f"图表：{chart_type} · 房间：{room}")
             return
@@ -488,7 +493,7 @@ class EDAPage(QWidget):
             else:  #相关性热力图
                 fig = self._room_heatmap(room, wide, available)
 
-            self._show_tab(FixedAspectCanvas(fig), room)
+            self._show_tab(AdaptiveCanvas(fig), room)
             self._chart_generated = True
             self.result_hint.setText(f"图表：{chart_type} · 房间：{room}（{len(available)} 个变量）")
         except Exception as e:
@@ -506,7 +511,7 @@ class EDAPage(QWidget):
     def _room_histogram(self, room, wide, indicators):
         #一个房间内各所选变量的分布直方图
         n = len(indicators)
-        fig, axes = plt.subplots(1, n, figsize=(5 * n, 4.5), dpi=100, constrained_layout=True)
+        fig, axes = plt.subplots(1, n, figsize=(min(5 * n, 16), 4.5), dpi=100, constrained_layout=True)
         if n == 1:
             axes = [axes]
         for ax, ind in zip(axes, indicators):
@@ -521,7 +526,7 @@ class EDAPage(QWidget):
     def _room_boxplot(self, room, wide, indicators):
         #一个房间内各所选变量的箱线图对比
         data = [wide[ind].dropna().values for ind in indicators]
-        fig, ax = plt.subplots(figsize=(4.5 * len(indicators), 4.5), dpi=100, constrained_layout=True)
+        fig, ax = plt.subplots(figsize=(min(4.5 * len(indicators), 16), 4.5), dpi=100, constrained_layout=True)
         bp = ax.boxplot(data, patch_artist=True)
         ax.set_xticks(range(1, len(data) + 1), indicators)
         for patch in bp["boxes"]:

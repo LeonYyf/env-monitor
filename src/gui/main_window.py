@@ -11,6 +11,7 @@ from .pages.page_import import ImportPage
 from .pages.page_cleaning import CleaningPage
 from .pages.page_eda import EDAPage
 from .pages.page_reporting import ReportingPage
+from src.data_store import data_store
 
 # 阶段列表（名称 + 状态栏说明）
 STAGES = [
@@ -103,6 +104,7 @@ class MainWindow(QMainWindow):
 
     def reset_downstream(self):
         #导入新文件前重置下游页面缓存
+        data_store.reset()
         self.completed_count = 0
         self._refresh_sidebar()
         for page in self.pages[1:]:
@@ -144,6 +146,9 @@ class MainWindow(QMainWindow):
         for page in self.pages:
             page.main_window = self
 
+        # 切换页面时，自动让目标页从共享内存加载数据（幂等）
+        self.stack.currentChanged.connect(self._on_stack_current_changed)
+
         # 主布局
         central = QWidget()
         main_layout = QHBoxLayout(central)
@@ -172,6 +177,13 @@ class MainWindow(QMainWindow):
         #外部切换到指定页面
         self.sidebar.setCurrentRow(index)
         self.stack.setCurrentIndex(index)
+
+    def _on_stack_current_changed(self, index: int):
+        #进入某页时自动从共享内存加载数据（无该方法的页面跳过）
+        if 0 <= index < len(self.pages):
+            page = self.pages[index]
+            if hasattr(page, "load_from_store"):
+                page.load_from_store()
 
     def show_message(self, title: str, message: str, msg_type: str = "info"):
         #弹出提示对话框
