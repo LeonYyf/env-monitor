@@ -7,12 +7,11 @@ BASE_DIR = Path(__file__).parent 会指向临时目录，导致数据库被建�
 临时目录里、每次打开都丢数据。
 
 本钩子在主程序运行前执行，直接改写 config 模块的属性，把数据目录
-改到 exe 所在目录；同时把 Windows 上的图表字体改成微软雅黑。
-全程不改动任何源码。
+改到 exe 所在目录。图表中文字体已由 src/fonts.py 的 setup_chinese_font()
+统一自动探测，无需在此处理。全程不改动任何源码。
 """
 
 import sys
-import platform
 from pathlib import Path
 
 import config
@@ -32,8 +31,3 @@ if getattr(sys, "frozen", False):
     for d in (config.RAW_DATA_DIR, config.PROCESSED_DATA_DIR,
               config.CHART_DIR, config.REPORT_DIR):
         d.mkdir(parents=True, exist_ok=True)
-
-
-# Windows 上图表中文用微软雅黑（macOS 字体 Arial Unicode MS 不存在）
-if platform.system() == "Windows":
-    config.VIZ_DEFAULTS["font_family"] = "Microsoft YaHei"

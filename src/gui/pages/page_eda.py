@@ -15,10 +15,10 @@ from PySide6.QtGui import QColor
 
 from src.gui.chart_canvas import AdaptiveCanvas
 from src.data_store import data_store
+from src.fonts import setup_chinese_font
 
-# 设置中文字体
-plt.rcParams["font.family"] = config.VIZ_DEFAULTS["font_family"]
-plt.rcParams["axes.unicode_minus"] = False
+# 设置中文字体（跨平台自动探测，避免中文标签显示成方块乱码）
+setup_chinese_font()
 sns.set_palette(config.VIZ_DEFAULTS["color_palette"])
 
 

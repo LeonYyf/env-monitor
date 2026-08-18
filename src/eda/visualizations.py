@@ -11,10 +11,10 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import config
+from src.fonts import setup_chinese_font
 
-# 设置中文字体
-plt.rcParams["font.family"] = config.VIZ_DEFAULTS["font_family"]
-plt.rcParams["axes.unicode_minus"] = False
+# 设置中文字体（跨平台自动探测）
+setup_chinese_font()
 sns.set_palette(config.VIZ_DEFAULTS["color_palette"])
 
 
