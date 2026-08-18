@@ -460,7 +460,7 @@ class EDAPage(QWidget):
 
         #双轴对比图固定用「送风量 + 换气次数」，不需要勾选变量
         if chart_type == "送风量 vs 换气次数（双轴）":
-            self.result_tabs.clear()
+            self._clear_result_tabs()
             try:
                 fig = self._room_dual_axis(room, wide)
             except Exception as e:
@@ -482,7 +482,7 @@ class EDAPage(QWidget):
             QMessageBox.warning(self, "提示", f"房间「{room}」缺少所选变量的数据。")
             return
 
-        self.result_tabs.clear()
+        self._clear_result_tabs()
         try:
             if chart_type == "直方图（分布）":
                 fig = self._room_histogram(room, wide, available)
@@ -614,9 +614,25 @@ class EDAPage(QWidget):
         return fig
 
     #结果展示辅助
+    def _close_result_figures(self):
+        #反复「生成图表」时，先关掉旧图表对应的 figure：QTabWidget 移除
+        #控件不会释放底层 matplotlib Figure，不关闭会一直残留在全局池里，
+        #导致内存随操作次数持续上涨。
+        for i in range(self.result_tabs.count()):
+            w = self.result_tabs.widget(i)
+            if hasattr(w, "figure"):
+                plt.close(w.figure)
+
+    def _clear_result_tabs(self):
+        self._close_result_figures()
+        self.result_tabs.clear()
+
     def _show_tab(self, widget, name):
         for i in range(self.result_tabs.count()):
             if self.result_tabs.tabText(i) == name:
+                old = self.result_tabs.widget(i)
+                if hasattr(old, "figure"):
+                    plt.close(old.figure)
                 self.result_tabs.removeTab(i)
                 break
         self.result_tabs.addTab(widget, name)
