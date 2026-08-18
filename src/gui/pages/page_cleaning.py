@@ -201,6 +201,7 @@ class CleaningPage(QWidget):
 
         self.method_group = QGroupBox("选择处理方法")
         self.method_layout = QVBoxLayout(self.method_group)
+        self.method_layout.setSpacing(10)
         self.method_label = QLabel("请先加载数据")
         self.method_label.setWordWrap(True)
         self.method_layout.addWidget(self.method_label)
