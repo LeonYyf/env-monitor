@@ -18,6 +18,19 @@ from src.cleaning.pipeline import CleaningPipeline
 _MISSING_BG = "#FECACA"
 _OUTLIER_BG = "#BBF7D0"
 
+#数据视图表头的中文显示名：底层列名是英文内部名，展示时换成中文，不动数据本身
+_COLUMN_LABELS = {
+    "sheet_name": "数据表",
+    "record_date": "采样日期",
+    "room_name": "房间名称",
+    "room_adjacent": "相邻房间",
+    "particle_size": "粒径",
+    "indicator_name": "指标代码",
+    "indicator_cn": "指标名称",
+    "value": "数值",
+    "unit": "单位",
+}
+
 
 class CleaningWorker(QThread):
     #后台清洗线程
@@ -586,7 +599,7 @@ class CleaningPage(QWidget):
 
         table.setRowCount(n_rows)
         table.setColumnCount(len(df.columns))
-        table.setHorizontalHeaderLabels([str(c) for c in df.columns])
+        table.setHorizontalHeaderLabels([_COLUMN_LABELS.get(str(c), str(c)) for c in df.columns])
 
         for i, (_, row) in enumerate(display.iterrows()):
             for j, col in enumerate(df.columns):
