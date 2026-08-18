@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QProgressBar,
     QMessageBox, QSplitter, QHeaderView,
     QScrollArea, QFrame, QDialog,
+    QComboBox, QInputDialog, QDoubleSpinBox, QFormLayout, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QColor
@@ -32,31 +33,70 @@ _COLUMN_LABELS = {
 }
 
 
+class ThresholdDialog(QDialog):
+    # 手动输入异常值上下阈值的对话框
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("输入异常值上下阈值")
+        layout = QFormLayout(self)
+
+        self.lower_spin = QDoubleSpinBox()
+        self.lower_spin.setRange(-1e9, 1e9)
+        self.lower_spin.setDecimals(4)
+        self.lower_spin.setValue(0.0)
+
+        self.upper_spin = QDoubleSpinBox()
+        self.upper_spin.setRange(-1e9, 1e9)
+        self.upper_spin.setDecimals(4)
+        self.upper_spin.setValue(0.0)
+
+        layout.addRow("下限（低于此值标绿）：", self.lower_spin)
+        layout.addRow("上限（高于此值标绿）：", self.upper_spin)
+
+        hint = QLabel("超出 [下限, 上限] 范围的数值会被打上绿色高亮，数据本身不变。")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #78716C;")
+        layout.addRow(hint)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def lower_value(self):
+        return self.lower_spin.value()
+
+    def upper_value(self):
+        return self.upper_spin.value()
+
+
 class CleaningWorker(QThread):
-    #后台清洗线程
+    #后台清洗线程：对多张数据表按相同步骤依次清洗
     progress = Signal(int, str)
-    step_done = Signal(str, dict)  # step_key, result_dict
-    finished = Signal(bool, str, object)  # success, message, cleaned_df
+    step_done = Signal(str, dict)  # "表名 · step_key", result_dict
+    finished = Signal(bool, str, object)  # success, message, sheet_pipelines
     error = Signal(str)
 
-    def __init__(self, df, steps_with_choices):
+    def __init__(self, sheet_pipelines, steps):
         super().__init__()
-        self.df = df
-        self.steps_with_choices = steps_with_choices  # [(step_key, choice), ...]
+        self.sheet_pipelines = sheet_pipelines  # {sheet_name: CleaningPipeline}
+        self.steps = steps  # [(step_key, choice), ...]
 
     def run(self):
         try:
-            pipeline = CleaningPipeline(self.df)
-            for i, (step_key, choice) in enumerate(self.steps_with_choices):
-                self.progress.emit(
-                    int((i / len(self.steps_with_choices)) * 100),
-                    f"正在执行: {step_key} ({choice})..."
-                )
-                result = pipeline.run_step(step_key, choice)
-                self.step_done.emit(step_key, result)
-
+            total = len(self.sheet_pipelines) * len(self.steps)
+            done = 0
+            for name, pipeline in self.sheet_pipelines.items():
+                for step_key, choice in self.steps:
+                    self.progress.emit(
+                        int((done / total) * 100) if total else 100,
+                        f"正在处理「{name}」- {step_key}..."
+                    )
+                    result = pipeline.run_step(step_key, choice)
+                    self.step_done.emit(f"{name} · {step_key}", result)
+                    done += 1
             self.progress.emit(100, "清洗完成！")
-            self.finished.emit(True, "数据清洗完成！", pipeline.df)
+            self.finished.emit(True, "数据清洗完成！", self.sheet_pipelines)
         except Exception as e:
             self.error.emit(str(e))
             self.finished.emit(False, f"清洗失败：{e}", None)
@@ -68,11 +108,19 @@ class CleaningPage(QWidget):
         self.cleaned_df = None
         self.original_df = None
         self.pipeline = None
+
+        #分表清洗状态：每张数据表独立一份 pipeline / 选择 / 完成度
+        self.sheets = []
+        self.current_sheet = None
+        self.sheet_pipeline = {}     # {sheet_name: CleaningPipeline}
+        self.sheet_choices = {}      # {sheet_name: {step_key: choice}}
+        self.sheet_completed = {}    # {sheet_name: set(step_index)}
+
         self.current_step_index = 0
         self.step_choices = {}
-        self.completed_steps = set()  #已完成的子步骤索引
-        self._cleaning_done = False 
-        self.step_names = ["1. 缺失值", "2. 异常值", "3. 时间格式", "4. 去重"]
+        self.completed_steps = set()  #当前数据表已完成的子步骤索引
+        self._cleaning_done = False
+        self.step_names = ["1. 缺失值", "2. 异常值", "3. 时间格式"]
 
         self._build_ui()
 
@@ -97,7 +145,7 @@ class CleaningPage(QWidget):
         title.setObjectName("pageTitle")
         layout.addWidget(title)
 
-        desc = QLabel("使用上一步导入的数据，按 4 个步骤向导式清洗：缺失值 / 异常值 / 时间格式 / 去重。")
+        desc = QLabel("使用上一步导入的数据，按数据表分别清洗：缺失值 / 异常值 / 时间格式。")
         desc.setObjectName("pageDescription")
         layout.addWidget(desc)
 
@@ -124,14 +172,20 @@ class CleaningPage(QWidget):
         step_bar.addStretch()
         layout.addLayout(step_bar)
 
-        #数据加载
+        #数据加载 + 数据表选择
         load_group = QGroupBox("加载数据")
         load_layout = QHBoxLayout(load_group)
-        load_layout.addWidget(QLabel("使用已导入的数据进行清洗："))
+        load_layout.addWidget(QLabel("按数据表分别清洗："))
         self.load_btn = QPushButton("加载数据")
         self.load_btn.setObjectName("secondaryBtn")
         self.load_btn.clicked.connect(self._load_data)
         load_layout.addWidget(self.load_btn)
+        load_layout.addWidget(QLabel("当前数据表："))
+        self.sheet_combo = QComboBox()
+        self.sheet_combo.setMinimumWidth(140)
+        self.sheet_combo.setEnabled(False)
+        self.sheet_combo.currentIndexChanged.connect(self._on_sheet_changed)
+        load_layout.addWidget(self.sheet_combo)
         self.data_status = QLabel("尚未加载")
         self.data_status.setStyleSheet("color: #A8A29E;")
         load_layout.addWidget(self.data_status)
@@ -250,11 +304,35 @@ class CleaningPage(QWidget):
             # 移除可能的非数据列（内存数据里通常没有，属兜底）
             skip_cols = ["id", "import_session_id", "extended_data", "created_at"]
             df = df.drop(columns=[c for c in skip_cols if c in df.columns], errors="ignore")
+
+            # 没有 sheet_name 列（或全空）时，把整份数据当作一张表
+            if "sheet_name" not in df.columns or df["sheet_name"].isna().all():
+                df = df.copy()
+                df["sheet_name"] = "全部数据"
+
             self.original_df = df
 
-            self.pipeline = CleaningPipeline(df)
-            self.data_status.setText(f"已加载 {len(df)} 行, {len(df.columns)} 列")
-            self.data_status.setStyleSheet("color: #0F766E;")
+            # 按数据表拆分，各自独立清洗
+            self.sheets = sorted(df["sheet_name"].dropna().unique().tolist())
+            self.sheet_pipeline = {}
+            self.sheet_choices = {}
+            self.sheet_completed = {}
+            for name in self.sheets:
+                sub = df[df["sheet_name"] == name].copy()
+                self.sheet_pipeline[name] = CleaningPipeline(sub)
+                self.sheet_choices[name] = {}
+                self.sheet_completed[name] = set()
+
+            # 填充数据表下拉框
+            self.sheet_combo.blockSignals(True)
+            self.sheet_combo.clear()
+            self.sheet_combo.addItems(self.sheets)
+            self.sheet_combo.setEnabled(True)
+            self.sheet_combo.setCurrentIndex(0)
+            self.sheet_combo.blockSignals(False)
+
+            # 切到第一张表
+            self._switch_sheet(self.sheets[0])
 
             #启用功能
             self.load_btn.setEnabled(False)
@@ -263,10 +341,7 @@ class CleaningPage(QWidget):
             for btn in self.step_buttons:
                 btn.setEnabled(True)
 
-            #显示第一步
-            self.current_step_index = 0
-            self._show_step(0)
-            self._log("数据加载完成，请开始选择清洗方法。")
+            self._log(f"数据加载完成：共 {len(self.sheets)} 张数据表，将分别清洗。")
 
         except Exception as e:
             QMessageBox.critical(self, "加载失败", f"加载数据时出错：{e}")
@@ -276,15 +351,46 @@ class CleaningPage(QWidget):
         if self.original_df is None and data_store.get_for_cleaning() is not None:
             self._load_data()
 
+    def _switch_sheet(self, name: str):
+        #切换到指定数据表，加载它自己的 pipeline / 选择 / 完成度
+        self.current_sheet = name
+        self.pipeline = self.sheet_pipeline[name]
+        self.step_choices = self.sheet_choices[name]
+        self.completed_steps = self.sheet_completed[name]
+        self.current_step_index = 0
+
+        self.data_status.setText(
+            f"「{name}」{len(self.pipeline.df)} 行 × {len(self.pipeline.df.columns)} 列"
+        )
+        self.data_status.setStyleSheet("color: #0F766E;")
+        self._show_step(0)
+
+    def _on_sheet_changed(self, index: int):
+        name = self.sheet_combo.itemText(index) if index >= 0 else ""
+        if name and self.sheet_pipeline and name in self.sheet_pipeline \
+                and name != self.current_sheet:
+            self._switch_sheet(name)
+
     def reset(self):
         #清空已加载的数据与清洗状态
         self.cleaned_df = None
         self.original_df = None
         self.pipeline = None
+        self.sheets = []
+        self.current_sheet = None
+        self.sheet_pipeline = {}
+        self.sheet_choices = {}
+        self.sheet_completed = {}
         self.current_step_index = 0
         self.step_choices = {}
         self.completed_steps = set()
         self._cleaning_done = False
+
+        #数据表下拉框复位
+        self.sheet_combo.blockSignals(True)
+        self.sheet_combo.clear()
+        self.sheet_combo.setEnabled(False)
+        self.sheet_combo.blockSignals(False)
 
         #数据状态
         self.data_status.setText("尚未加载")
@@ -424,12 +530,26 @@ class CleaningPage(QWidget):
         choice = self._get_current_choice()
         checked = self.method_button_group.checkedButton()
         label = checked.text() if checked else choice
+
+        #需要用户输入参数的选项：应用时再弹窗，这里只给提示
+        if step_key == "missing" and choice == "fill":
+            self.preview_info.setText("选择「统一填充」：点击「应用此步骤」后输入要填充的内容。")
+            return
+        if step_key == "outliers" and choice == "manual":
+            self.preview_info.setText("选择「手动输入阈值」：点击「应用此步骤」后输入上下阈值，超出范围标绿。")
+            return
+        if step_key == "outliers" and choice == "skip":
+            self.pipeline.outlier_bounds = None
+            self._update_preview(self.pipeline.df)
+            self.preview_info.setText("已选择「跳过」，不做异常值高亮。")
+            return
+
         try:
             temp = CleaningPipeline(self.pipeline.df.copy())
             result = temp.run_step(step_key, choice)
             if result.get("ok"):
                 self._update_preview(result["after"])
-                self.preview_info.setText(f"{self.preview_info.text()} · 预览「{label}」")
+                self.preview_info.setText(f"预览「{label}」")
         except Exception:
             pass  # 预览失败不打断操作
 
@@ -438,13 +558,31 @@ class CleaningPage(QWidget):
         if not self.pipeline:
             return
 
-        step_key = CleaningPipeline.STEPS[self.current_step_index]["key"]
+        step_def = CleaningPipeline.STEPS[self.current_step_index]
+        step_key = step_def["key"]
         choice = self._get_current_choice()
+
+        #需要额外输入参数时先弹窗收集
+        params = {}
+        if step_key == "missing" and choice == "fill":
+            fill_value, ok = QInputDialog.getText(
+                self, "统一填充缺失值", "请输入要统一填充的内容："
+            )
+            if not ok:
+                return  # 用户取消
+            params["fill_value"] = fill_value
+        elif step_key == "outliers" and choice == "manual":
+            dlg = ThresholdDialog(self)
+            if dlg.exec() != QDialog.Accepted:
+                return  # 用户取消
+            params["lower"] = dlg.lower_value()
+            params["upper"] = dlg.upper_value()
+
         self.step_choices[step_key] = choice
         self.completed_steps.add(self.current_step_index)
 
         self._log(f"执行 {step_key}，方法: {choice}")
-        result = self.pipeline.run_step(step_key, choice)
+        result = self.pipeline.run_step(step_key, choice, params)
 
         if result["ok"]:
             self.pipeline.df = result["after"]
@@ -452,36 +590,53 @@ class CleaningPage(QWidget):
             for log_entry in result.get("step_log", []):
                 self._log(str(log_entry))
 
-            step_name = CleaningPipeline.STEPS[self.current_step_index]["name"]
+            step_name = step_def["name"]
             self._log(f"步骤「{step_name}」已完成")
             self._refresh_step_buttons()
 
-            #自动跳到下一步
+            #本表还有未完成步骤 → 下一步
             if self.current_step_index < len(self.step_names) - 1:
                 self._show_step(self.current_step_index + 1)
-            else:
-                #最后一步完成
-                self._finish_cleaning()
-                QMessageBox.information(self, "完成", "数据清洗全部完成！点击「进入探索分析」继续。")
+                return
+
+            #本表完成，检查是否还有未完成的表
+            remaining = [n for n in self.sheets
+                         if len(self.sheet_completed.get(n, set())) < len(self.step_names)]
+            if remaining:
+                finished_sheet = self.current_sheet
+                next_sheet = remaining[0]
+                self._switch_sheet(next_sheet)
+                QMessageBox.information(
+                    self, "本表完成",
+                    f"「{finished_sheet}」清洗完成，已切换到「{next_sheet}」，请继续。"
+                )
+                return
+
+            #全部完成
+            self._finish_cleaning()
+            QMessageBox.information(self, "完成", "数据清洗全部完成！点击「进入探索分析」继续。")
 
     def _finish_cleaning(self):
-        #清洗全部完成：标记步骤完成、解锁侧边栏
-        self.cleaned_df = self.pipeline.df
-        data_store.set_cleaned(self.cleaned_df)
+        #清洗全部完成：合并所有数据表、解锁侧边栏
+        parts = [self.sheet_pipeline[n].df for n in self.sheets]
+        combined = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+        self.cleaned_df = combined
+        data_store.set_cleaned(combined)
         self._cleaning_done = True
         self.apply_btn.setEnabled(False)
         self.next_btn.setText("进入探索分析")
         self.next_btn.setEnabled(True)
-        self._log("全部 4 个步骤已完成，可进入「探索分析」。")
+        self._log("全部数据表清洗完成，可进入「探索分析」。")
         if hasattr(self, "main_window") and self.main_window:
             self.main_window.mark_step_completed(1)
 
     def _run_all(self):
-        #一键执行所有步骤（使用默认选择）
+        #一键执行所有数据表的全部步骤（使用默认选择）
         reply = QMessageBox.question(
             self, "确认",
-            "将使用默认方法（仅高亮缺失值 + IQR异常值 + 自动时间解析 + 跳过去重）\n\n"
-            "执行全部清洗步骤。确认继续？",
+            "将对所有数据表执行默认清洗：\n\n"
+            "缺失值 = 跳过\n异常值 = 跳过\n时间格式 = 统一为标准格式\n\n"
+            "确认继续？",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply != QMessageBox.Yes:
@@ -491,7 +646,7 @@ class CleaningPage(QWidget):
         self.run_all_btn.setEnabled(False)
 
         steps = [(s["key"], s["options"][0]["id"]) for s in CleaningPipeline.STEPS]
-        self.worker = CleaningWorker(self.original_df.copy(), steps)
+        self.worker = CleaningWorker(self.sheet_pipeline, steps)
         self.worker.progress.connect(lambda p, m: self.progress_bar.setValue(p))
         self.worker.step_done.connect(self._on_step_done)
         self.worker.finished.connect(self._on_cleaning_finished)
@@ -504,21 +659,18 @@ class CleaningPage(QWidget):
             for entry in result.get("step_log", []):
                 self._log(f"   {entry}")
 
-    def _on_cleaning_finished(self, success: bool, message: str, df):
+    def _on_cleaning_finished(self, success: bool, message: str, sheet_pipelines):
         self.progress_bar.setVisible(False)
         self.run_all_btn.setEnabled(True)
         self._log(message)
 
-        if success and df is not None:
-            self.cleaned_df = df
-            self.pipeline.df = df
-            self.completed_steps = set(range(len(self.step_names)))
-            self.current_step_index = len(self.step_names) - 1
-            self._refresh_step_buttons()
-            self._update_preview(df)
+        if success and sheet_pipelines:
+            for name in self.sheets:
+                self.sheet_completed[name] = set(range(len(self.step_names)))
             self._finish_cleaning()
             QMessageBox.information(self, "完成", f"{message}\n\n是否进入「探索分析」步骤？")
-            self.main_window.switch_to_page(2)
+            if hasattr(self, "main_window") and self.main_window:
+                self.main_window.switch_to_page(2)
 
     #辅助
     def _open_data_view(self):
@@ -528,7 +680,7 @@ class CleaningPage(QWidget):
         df = self.pipeline.df
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("完整数据视图")
+        dialog.setWindowTitle(f"完整数据视图 — 「{self.current_sheet}」")
         dialog.resize(1100, 720)
         dlg_layout = QVBoxLayout(dialog)
 
@@ -566,16 +718,14 @@ class CleaningPage(QWidget):
         missing = df.isna()
 
         outlier = pd.DataFrame(False, index=df.index, columns=df.columns)
-        for col in df.select_dtypes(include=[np.number]).columns:
-            series = df[col].dropna()
-            if len(series) == 0:
-                continue
-            q1, q3 = series.quantile(0.25), series.quantile(0.75)
-            iqr = q3 - q1
-            if iqr == 0:
-                continue
-            lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
-            outlier[col] = (df[col] < lo) | (df[col] > hi)
+        bounds = self.pipeline.outlier_bounds if self.pipeline is not None else None
+        if bounds is not None:
+            lo, hi = bounds
+            for col in df.select_dtypes(include=[np.number]).columns:
+                if lo is not None:
+                    outlier[col] = outlier[col] | (df[col] < lo)
+                if hi is not None:
+                    outlier[col] = outlier[col] | (df[col] > hi)
 
         return missing, outlier
 

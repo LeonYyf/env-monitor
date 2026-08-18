@@ -2,51 +2,37 @@ import pandas as pd
 from typing import Callable, Dict, List, Optional, Any
 
 from .missing_handler import MissingHandler
-from .outlier_handler import OutlierHandler
-from .formatter import Formatter
 
 
 class CleaningPipeline:
-    # 4个清洗步骤
+    # 3 个清洗步骤（去重已移除）
     STEPS = [
         {
             "key": "missing",
             "name": "缺失值处理",
-            "description": "检测数据中的缺失值（仅高亮标红，不填充、不删除）",
+            "description": "检测数据中的缺失值：可跳过、删除含缺失值的列、或统一填充",
             "options": [
-                {"id": "highlight", "label": "仅高亮（不填充）", "desc": "只在预览中把缺失值标红显示，不修改任何数据"},
+                {"id": "skip", "label": "跳过（默认）", "desc": "不做任何处理，缺失值保留"},
+                {"id": "drop_cols", "label": "删除缺失值所在列", "desc": "删除所有含有缺失值的列"},
+                {"id": "fill", "label": "统一填充缺失值", "desc": "把所有缺失值填充为同一个指定内容"},
             ],
         },
         {
             "key": "outliers",
             "name": "异常值处理",
-            "description": "检测并处理偏离正常范围的异常值",
+            "description": "通过手动输入的上下阈值判断异常值，并打上绿色高亮（不改数据）",
             "options": [
-                {"id": "iqr", "label": "IQR 方法（推荐）", "desc": "Q1-1.5×IQR ~ Q3+1.5×IQR 之外视为异常，替换为NaN"},
-                {"id": "zscore", "label": "Z-Score 方法", "desc": "|Z|>3 视为异常（假设正态分布），替换为NaN"},
-                {"id": "clip", "label": "自定义范围截断", "desc": "按业务常识设置上下限，超出截断到边界"},
-                {"id": "winsorize", "label": "Winsorize 缩尾", "desc": "将两端5%的极值替换为边界值，更保守"},
-                {"id": "skip", "label": "跳过", "desc": "不做异常值处理"},
+                {"id": "skip", "label": "跳过（默认）", "desc": "不做任何高亮"},
+                {"id": "manual", "label": "手动输入阈值", "desc": "输入上下限，数值列中超出范围的值打上绿色高亮"},
             ],
         },
         {
             "key": "timeformat",
             "name": "时间格式统一",
-            "description": "将所有时间字段统一为标准格式 YYYY-MM-DD HH:MM:SS",
+            "description": "将时间字段统一为标准格式（不包含时分秒）",
             "options": [
-                {"id": "auto", "label": "自动解析（推荐）", "desc": "使用 pandas 自动检测并转换时间格式"},
-                {"id": "auto_extract", "label": "自动解析+提取特征", "desc": "转换时间并额外提取：小时、周几、月份、是否周末"},
-            ],
-        },
-        {
-            "key": "dedup",
-            "name": "去重处理",
-            "description": "删除重复记录",
-            "options": [
-                {"id": "skip", "label": "跳过（推荐）", "desc": "不做去重处理"},
-                {"id": "keep_first", "label": "保留第一条", "desc": "重复记录中保留最早出现的那条"},
-                {"id": "keep_last", "label": "保留最后一条", "desc": "重复记录中保留最后出现的那条"},
-                {"id": "time_loc", "label": "按时间+位置去重", "desc": "同一时间同一地点不应有重复记录"},
+                {"id": "standard", "label": "统一为标准格式（默认）", "desc": "转为 YYYY-MM-DD，去掉时分秒"},
+                {"id": "keep", "label": "保持不变", "desc": "不修改时间格式"},
             ],
         },
     ]
@@ -57,6 +43,7 @@ class CleaningPipeline:
         self.user_callback = user_callback or self._default_callback
         self.full_log = []
         self.step_results = {}  # 每步的结果
+        self.outlier_bounds = None  # (lower, upper) 用于绿色高亮；None=不高亮
 
     def run(self, selected_steps: List[str] = None) -> tuple:
         if selected_steps is None:
@@ -67,27 +54,23 @@ class CleaningPipeline:
             if step_key not in selected_steps:
                 continue
 
-            # 生成当前步骤的信息
             summary = self._make_summary(step_key)
             if summary is None:
                 continue
 
-            # 询问用户方法
             choice = self.user_callback(step_def, summary)
-
-            # 执行
             self._execute_step(step_key, choice)
 
         return self.df, self.full_log
 
-    def run_step(self, step_key: str, choice: str) -> Dict:
+    def run_step(self, step_key: str, choice: str, params: Dict = None) -> Dict:
         step_def = next((s for s in self.STEPS if s["key"] == step_key), None)
         if step_def is None:
             return {"ok": False, "error": f"未知步骤: {step_key}"}
 
         before = self.df.copy()
         summary = self._make_summary(step_key)
-        log = self._execute_step(step_key, choice)
+        log = self._execute_step(step_key, choice, params or {})
 
         return {
             "ok": True,
@@ -104,103 +87,96 @@ class CleaningPipeline:
             if missing_info.empty:
                 return {"status": "clean", "message": "未检测到缺失值，此步骤可跳过",
                         "missing_table": None, "missing_count": 0}
+            cols = "、".join(missing_info["列名"].astype(str))
             return {"status": "found", "message":
-                    f"检测到 {len(missing_info)} 列存在缺失值，共 {missing_info['缺失数量'].sum()} 个",
+                    f"检测到 {len(missing_info)} 列存在缺失值（{cols}），共 {int(missing_info['缺失数量'].sum())} 个",
                     "missing_table": missing_info,
                     "missing_count": int(missing_info["缺失数量"].sum())}
 
         elif step_key == "outliers":
-            handler = OutlierHandler(self.df)
-            outlier_info = handler.detect_outliers_summary()
-            total_outliers = outlier_info["异常值数量"].sum() if not outlier_info.empty else 0
-            if total_outliers == 0:
-                return {"status": "clean", "message": "未检测到异常值（IQR方法），此步骤可跳过",
-                        "outlier_table": None, "outlier_count": 0}
+            num_cols = self.df.select_dtypes(include=["number"]).columns.tolist()
+            if not num_cols:
+                return {"status": "clean", "message": "没有可判断的数值列", "num_cols": []}
             return {"status": "found", "message":
-                    f"检测到 {total_outliers} 个异常值（分布在 {len(outlier_info)} 个房间×指标组合）",
-                    "outlier_table": outlier_info, "outlier_count": int(total_outliers)}
+                    "选择「手动输入阈值」后将提示输入上下限，数值列中超出范围的值会打上绿色高亮（数据本身不变）。",
+                    "num_cols": num_cols}
 
         elif step_key == "timeformat":
-            # 优先按列名识别时间列（record_date 等），不依赖 dtype；
-            # 内存数据里 record_date 已是 datetime，按 dtype 会漏判并误伤文本列。
+            # 优先按列名识别时间列（record_date 等），不依赖 dtype
             time_cols = [c for c in self.df.columns if
                          any(kw in c.lower() for kw in ["time", "date", "时间", "日期"])]
             if not time_cols:
                 time_cols = [c for c in self.df.columns if self.df[c].dtype == object]
-            return {"status": "found", "message": f"检测到 {len(time_cols)} 个可能的文本时间列",
+            return {"status": "found", "message": f"检测到 {len(time_cols)} 个时间列",
                     "time_columns": time_cols}
-
-        elif step_key == "dedup":
-            dup_count = self.df.duplicated().sum()
-            if dup_count == 0:
-                return {"status": "clean", "message": "未检测到重复行，此步骤可跳过",
-                        "dup_count": 0}
-            return {"status": "found", "message": f"检测到 {dup_count} 条重复记录",
-                    "dup_count": int(dup_count)}
 
         return None
 
-    def _execute_step(self, step_key: str, choice: str) -> List[Dict]:
-        
+    def _execute_step(self, step_key: str, choice: str, params: Dict = None) -> List[Dict]:
+        params = params or {}
         log = []
 
         if step_key == "missing":
-            # 仅高亮不填充
             missing_count = int(self.df.isna().sum().sum())
-            log = [{"步骤": "缺失值-仅高亮",
-                    "说明": f"检测到 {missing_count} 个缺失值，未填充（预览中标红）"}]
+            if choice == "drop_cols":
+                # 删除所有含有缺失值的列
+                cols_with_missing = [c for c in self.df.columns if self.df[c].isna().any()]
+                self.df = self.df.drop(columns=cols_with_missing)
+                dropped = "、".join(cols_with_missing) if cols_with_missing else "无"
+                log = [{"步骤": "缺失值-删除列",
+                        "删除列": dropped,
+                        "说明": f"已删除 {len(cols_with_missing)} 个含缺失值的列"}]
+            elif choice == "fill":
+                fill_value = params.get("fill_value", "")
+                self.df = self.df.fillna(fill_value)
+                log = [{"步骤": "缺失值-统一填充",
+                        "填充值": str(fill_value),
+                        "说明": f"已将 {missing_count} 个缺失值统一填充为「{fill_value}」"}]
+            else:  # skip
+                log = [{"步骤": "缺失值-跳过",
+                        "说明": f"检测到 {missing_count} 个缺失值，未处理（预览中标红）"}]
 
         elif step_key == "outliers":
-            handler = OutlierHandler(self.df)
-            if choice == "iqr":
-                handler.remove_by_iqr()
-            elif choice == "zscore":
-                handler.remove_by_zscore()
-            elif choice == "clip":
-                handler.clip_by_bounds({})
-            elif choice == "winsorize":
-                handler.winsorize()
-            elif choice == "skip":
-                pass
-            else:
-                handler.remove_by_iqr()
-            self.df = handler.get_result()
-            log = handler.get_log()
+            # 本步骤只记录阈值用于绿色高亮，不修改任何数据
+            if choice == "manual":
+                lower = params.get("lower")
+                upper = params.get("upper")
+                self.outlier_bounds = (lower, upper)
+                log = [{"步骤": "异常值-手动阈值",
+                        "下限": lower, "上限": upper,
+                        "说明": "已按上下阈值标出异常值（绿色高亮），数据本身不变"}]
+            else:  # skip
+                self.outlier_bounds = None
+                log = [{"步骤": "异常值-跳过", "说明": "不做高亮"}]
 
         elif step_key == "timeformat":
-            handler = Formatter(self.df)
             summary = self._make_summary("timeformat")
             time_cols = summary.get("time_columns", [])
-            time_col = time_cols[0] if time_cols else None
-
-            if time_col:
-                handler.unify_time_format(time_col)
-                if choice == "auto_extract":
-                    handler.extract_time_features(time_col)
-            self.df = handler.get_result()
-            log = handler.get_log()
-
-        elif step_key == "dedup":
-            handler = Formatter(self.df)
-            if choice == "keep_first":
-                handler.deduplicate(keep="first")
-            elif choice == "keep_last":
-                handler.deduplicate(keep="last")
-            elif choice == "time_loc":
-                summary = self._make_summary("timeformat")
-                time_cols = summary.get("time_columns", [])
-                time_col = time_cols[0] if time_cols else None
-                if time_col:
-                    handler.deduplicate_time_location(time_col)
+            if choice == "standard":
+                if not time_cols:
+                    log = [{"步骤": "时间格式统一", "状态": "跳过", "原因": "未检测到时间列"}]
                 else:
-                    handler.deduplicate(keep="first")
-            elif choice == "skip":
-                pass
-            self.df = handler.get_result()
-            log = handler.get_log()
+                    converted = []
+                    for col in time_cols:
+                        self.df[col] = self._to_date_only(self.df[col])
+                        converted.append(col)
+                    log = [{"步骤": "时间格式统一",
+                            "转换列": "、".join(converted),
+                            "最终格式": "YYYY-MM-DD（不含时分秒）"}]
+            else:  # keep
+                log = [{"步骤": "时间格式-保持不变", "说明": "未修改时间格式"}]
 
         self.full_log.extend(log)
         return log
+
+    @staticmethod
+    def _to_date_only(series: pd.Series) -> pd.Series:
+        # 统一转为 YYYY-MM-DD（去掉时分秒）；无法解析的原样保留为缺失
+        s = pd.to_datetime(series, errors="coerce")
+        out = s.dt.strftime("%Y-%m-%d")
+        # NaT 位置统一置为 None，避免出现 "NaT" 字符串
+        out = out.where(s.notna(), None)
+        return out
 
     @staticmethod
     def _default_callback(step_def: Dict, summary: Dict) -> str:
