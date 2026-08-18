@@ -1,10 +1,10 @@
-"""
-Excel 文件读取与解析模块
-专门处理洁净车间环境监测 Excel 数据。
-支持两种 Sheet 格式：
-- 尘埃粒子（WIDE: 房间作为列头）
-- 风量（WIDE+水平重复: 房间为行,多组日期列）
-"""
+#
+# Excel 文件读取与解析模块
+# 专门处理洁净车间环境监测 Excel 数据。
+# 支持两种 Sheet 格式：
+# - 尘埃粒子（WIDE: 房间作为列头）
+# - 风量（WIDE+水平重复: 房间为行,多组日期列）
+#
 
 import hashlib
 import pandas as pd
@@ -14,7 +14,7 @@ import config
 
 
 class ExcelReader:
-    """洁净车间 Excel 文件读取器"""
+    # 洁净车间 Excel 文件读取器
 
     def __init__(self, file_path: str):
         self.file_path = Path(file_path)
@@ -26,7 +26,7 @@ class ExcelReader:
     # 文件信息
     # ----------------------------------------------------------------
     def compute_hash(self) -> str:
-        """计算文件 SHA-256（用于检测重复导入）"""
+        # 计算文件 SHA-256（用于检测重复导入）
         sha = hashlib.sha256()
         with open(self.file_path, "rb") as f:
             for chunk in iter(lambda: f.read(8192), b""):
@@ -34,7 +34,7 @@ class ExcelReader:
         return sha.hexdigest()
 
     def detect_file_type(self) -> str:
-        """检测文件类型"""
+        # 检测文件类型
         suffix = self.file_path.suffix.lower()
         if suffix in (".xlsx",):
             return "xlsx"
@@ -46,7 +46,7 @@ class ExcelReader:
             raise ValueError(f"不支持的文件格式: {suffix}")
 
     def get_sheet_names(self) -> List[str]:
-        """获取所有工作表名"""
+        # 获取所有工作表名
         ft = self.detect_file_type()
         if ft == "csv":
             return ["Sheet1"]
@@ -60,10 +60,10 @@ class ExcelReader:
     # 核心：读取 + 自动识别 Sheet 类型 → 统一长格式
     # ----------------------------------------------------------------
     def read_all_sheets(self) -> Dict[str, pd.DataFrame]:
-        """
-        读取所有 sheet，自动识别格式并转换为统一的长格式。
-        返回: {sheet_name: DataFrame (长格式)}
-        """
+        #
+        # 读取所有 sheet，自动识别格式并转换为统一的长格式。
+        # 返回: {sheet_name: DataFrame (长格式)}
+        #
         if self.xl is None:
             self.get_sheet_names()
 
@@ -87,18 +87,18 @@ class ExcelReader:
     # 尘埃粒子 Sheet 解析
     # ----------------------------------------------------------------
     def _parse_particle(self, raw: pd.DataFrame) -> pd.DataFrame:
-        """
-        输入（WIDE 格式，无表头行）：
-              0              | 1(微生物二更) | 2(微生物缓冲间) | ...
-            2026.1.4 0.5µm   | 11267         | 10364           | ...
-            2026.1.4 5µm     | 0             | 0               | ...
-
-        输出（LONG 格式）：
-            record_date | room_name   | particle_size | indicator_name  | value | unit
-            2026-01-04  | 微生物二更   | 0.5µm         | particle_05um  | 11267 | 个/m³
-            2026-01-04  | 微生物二更   | 5µm           | particle_5um   | 0     | 个/m³
-            ...
-        """
+        #
+        # 输入（WIDE 格式，无表头行）：
+        # 0              | 1(微生物二更) | 2(微生物缓冲间) | ...
+        # 2026.1.4 0.5µm   | 11267         | 10364           | ...
+        # 2026.1.4 5µm     | 0             | 0               | ...
+        #
+        # 输出（LONG 格式）：
+        # record_date | room_name   | particle_size | indicator_name  | value | unit
+        # 2026-01-04  | 微生物二更   | 0.5µm         | particle_05um  | 11267 | 个/m³
+        # 2026-01-04  | 微生物二更   | 5µm           | particle_5um   | 0     | 个/m³
+        # ...
+        #
         # 第 0 行是列头，数据从第 1 行开始
         headers = [str(c).strip() for c in raw.iloc[0].values]
         df = raw.iloc[1:].copy()
@@ -168,22 +168,22 @@ class ExcelReader:
     # 风量 Sheet 解析
     # ----------------------------------------------------------------
     def _parse_airflow(self, raw: pd.DataFrame) -> pd.DataFrame:
-        """
-        输入（水平重复格式）：
-            Row 0: 日期 | 房间 | 相邻 | 送风量 | 换气次数 | 日期 | 送风量 | 换气次数 | ... (重复多组)
-            Row 1: NaN  | 名称 | 房间 | (m³/h) | NaN     | NaN  | (m³/h) | NaN     | ... (单位行)
-            Row 2+: 2026.1.8 | 车间男二更 | 一更 | 1125 | 18.0 | 2026.2.5 | 1092 | ...
-
-        解析方式：按表头文字（日期 / 房间 / 相邻 / 送风量 / 换气次数）定位各列，
-        再按「第 g 个日期」配「第 g 组送风量/换气次数」。列顺序、组数、房间名
-        因文件而异都能正确识别，无需硬编码。
-
-        输出（LONG 格式）：
-            record_date | room_name | room_adjacent | indicator_name      | value | unit
-            2026-01-08  | 车间男二更 | 一更          | supply_air_volume   | 1125  | m³/h
-            2026-01-08  | 车间男二更 | 一更          | air_changes         | 18.0  | 次/h
-            ...
-        """
+        #
+        # 输入（水平重复格式）：
+        # Row 0: 日期 | 房间 | 相邻 | 送风量 | 换气次数 | 日期 | 送风量 | 换气次数 | ... (重复多组)
+        # Row 1: NaN  | 名称 | 房间 | (m³/h) | NaN     | NaN  | (m³/h) | NaN     | ... (单位行)
+        # Row 2+: 2026.1.8 | 车间男二更 | 一更 | 1125 | 18.0 | 2026.2.5 | 1092 | ...
+        #
+        # 解析方式：按表头文字（日期 / 房间 / 相邻 / 送风量 / 换气次数）定位各列，
+        # 再按「第 g 个日期」配「第 g 组送风量/换气次数」。列顺序、组数、房间名
+        # 因文件而异都能正确识别，无需硬编码。
+        #
+        # 输出（LONG 格式）：
+        # record_date | room_name | room_adjacent | indicator_name      | value | unit
+        # 2026-01-08  | 车间男二更 | 一更          | supply_air_volume   | 1125  | m³/h
+        # 2026-01-08  | 车间男二更 | 一更          | air_changes         | 18.0  | 次/h
+        # ...
+        #
         # 第 0 行是表头，第 1 行是单位说明，数据从第 2 行开始
         headers = [str(c).strip() if pd.notna(c) else "" for c in raw.iloc[0].values]
         data_rows = raw.iloc[2:].copy()
@@ -293,13 +293,13 @@ class ExcelReader:
     # 工具方法
     # ----------------------------------------------------------------
     def get_preview(self, sheet_name: str, rows: int = 10) -> pd.DataFrame:
-        """获取原始数据的预览（不做格式转换）"""
+        # 获取原始数据的预览（不做格式转换）
         raw = pd.read_excel(self.xl, sheet_name=sheet_name, header=None)
         return raw.head(rows)
 
     @staticmethod
     def get_indicator_info(indicator_name: str) -> Dict[str, str]:
-        """获取指标的详细信息（中文名、单位、描述）"""
+        # 获取指标的详细信息（中文名、单位、描述）
         info = config.KNOWN_INDICATORS.get(indicator_name)
         if info:
             return {

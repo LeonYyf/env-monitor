@@ -36,11 +36,11 @@ class Formatter:
         return self
 
     def extract_time_features(self, time_column: str) -> "Formatter":
-        """
-        从时间列中提取特征：
-        hour(小时), day_of_week(周几), month(月份), is_weekend(是否周末)
-        这些特征可用于后续回归建模（如"时段对温度的影响"）
-        """
+        #
+        # 从时间列中提取特征：
+        # hour(小时), day_of_week(周几), month(月份), is_weekend(是否周末)
+        # 这些特征可用于后续回归建模（如"时段对温度的影响"）
+        #
         if time_column not in self.df.columns:
             return self
 
@@ -60,11 +60,11 @@ class Formatter:
         return self
 
     def deduplicate(self, subset: List[str] = None, keep: str = "first") -> "Formatter":
-        """
-        去重处理
-        keep: 'first'=保留第一条, 'last'=保留最后一条, False=全部删除
-        subset: 按哪些列判断重复，None=所有列完全相同才算重复
-        """
+        #
+        # 去重处理
+        # keep: 'first'=保留第一条, 'last'=保留最后一条, False=全部删除
+        # subset: 按哪些列判断重复，None=所有列完全相同才算重复
+        #
         before = len(self.df)
         self.df = self.df.drop_duplicates(subset=subset, keep=keep)
         after = len(self.df)
@@ -80,9 +80,9 @@ class Formatter:
         return self
 
     def deduplicate_time_location(self, time_column: str, location_column: str = "location") -> "Formatter":
-        """
-        按时间+位置去重（同一时间同一地点不应有重复记录）
-        """
+        #
+        # 按时间+位置去重（同一时间同一地点不应有重复记录）
+        #
         subset = [time_column]
         if location_column in self.df.columns:
             subset.append(location_column)

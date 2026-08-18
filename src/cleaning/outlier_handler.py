@@ -16,11 +16,11 @@ class OutlierHandler:
     # 张冠李戴。因此必须按「房间 × 指标」分组，各自独立判定异常值。
     # ------------------------------------------------------------------
     def _is_long_format(self) -> bool:
-        """是否长表结构（含 indicator_cn + value）。"""
+        # 是否长表结构（含 indicator_cn + value）。
         return ("indicator_cn" in self.df.columns and "value" in self.df.columns)
 
     def _group_keys(self) -> List[str]:
-        """长表的分组键：优先「房间 × 指标」，退化为「指标」。"""
+        # 长表的分组键：优先「房间 × 指标」，退化为「指标」。
         keys = []
         if "room_name" in self.df.columns:
             keys.append("room_name")
@@ -29,7 +29,7 @@ class OutlierHandler:
         return keys
 
     def _iter_value_groups(self):
-        """按分组键产出 (标签, 索引数组, 该组的 value 序列)。"""
+        # 按分组键产出 (标签, 索引数组, 该组的 value 序列)。
         for name, idx in self.df.groupby(self._group_keys(), dropna=False).groups.items():
             if not isinstance(name, tuple):
                 name = (name,)
@@ -217,11 +217,11 @@ class OutlierHandler:
     # 自定义上下限截断
     # ------------------------------------------------------------------
     def clip_by_bounds(self, columns_bounds: Dict[str, Tuple[float, float]]) -> "OutlierHandler":
-        """
-        根据自定义上下限截断
-        columns_bounds: {"temperature": (0, 50), "humidity": (0, 100), ...}
-        超出范围的值被截断到边界值
-        """
+        #
+        # 根据自定义上下限截断
+        # columns_bounds: {"temperature": (0, 50), "humidity": (0, 100), ...}
+        # 超出范围的值被截断到边界值
+        #
         total = 0
         for col, (low, high) in columns_bounds.items():
             if col not in self.df.columns:

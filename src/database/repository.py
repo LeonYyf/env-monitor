@@ -1,7 +1,7 @@
-"""
-数据库操作仓库 — 高层数据访问接口
-封装常用的 CRUD 操作，GUI 层通过此模块访问数据。
-"""
+#
+# 数据库操作仓库 — 高层数据访问接口
+# 封装常用的 CRUD 操作，GUI 层通过此模块访问数据。
+#
 
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -13,7 +13,7 @@ from .models import ImportSession, MeasurementRecord, CleaningLog
 
 
 class Repository:
-    """统一数据访问仓库"""
+    # 统一数据访问仓库
 
     # ================================================================
     # 导入批次
@@ -22,7 +22,7 @@ class Repository:
     def create_import_session(file_name: str, file_hash: str,
                               sheet_name: str = None, record_count: int = 0,
                               column_mapping: dict = None) -> int:
-        """创建导入记录，返回 session_id"""
+        # 创建导入记录，返回 session_id
         session_obj = get_session()
         try:
             s = ImportSession(
@@ -40,7 +40,7 @@ class Repository:
 
     @staticmethod
     def update_import_count(session_id: int, count: int):
-        """更新导入记录数"""
+        # 更新导入记录数
         session_obj = get_session()
         try:
             s = session_obj.query(ImportSession).get(session_id)
@@ -52,7 +52,7 @@ class Repository:
 
     @staticmethod
     def list_import_sessions() -> pd.DataFrame:
-        """列出所有导入批次"""
+        # 列出所有导入批次
         engine = get_engine()
         return pd.read_sql(
             "SELECT id, file_name, sheet_name, record_count, imported_at "
@@ -65,7 +65,7 @@ class Repository:
     # ================================================================
     @staticmethod
     def insert_measurements(records: List[Dict[str, Any]], session_id: int):
-        """批量插入测量记录（长格式）"""
+        # 批量插入测量记录（长格式）
         session_obj = get_session()
         try:
             for r in records:
@@ -88,7 +88,7 @@ class Repository:
 
     @staticmethod
     def get_all_measurements(sheet_name: str = None) -> pd.DataFrame:
-        """获取所有测量数据（返回 DataFrame）"""
+        # 获取所有测量数据（返回 DataFrame）
         engine = get_engine()
         if sheet_name:
             return pd.read_sql(
@@ -104,7 +104,7 @@ class Repository:
     @staticmethod
     def get_measurements_by_indicator(indicator_name: str,
                                       sheet_name: str = None) -> pd.DataFrame:
-        """按指标获取数据 — 返回透视后的 DataFrame（行=日期×房间, 列=指标值）"""
+        # 按指标获取数据 — 返回透视后的 DataFrame（行=日期×房间, 列=指标值）
         engine = get_engine()
         sql = ("SELECT * FROM measurement_records WHERE indicator_name = :ind "
                "ORDER BY record_date, room_name")
@@ -118,7 +118,7 @@ class Repository:
 
     @staticmethod
     def get_rooms() -> List[str]:
-        """获取所有房间名称"""
+        # 获取所有房间名称
         engine = get_engine()
         df = pd.read_sql(
             "SELECT DISTINCT room_name FROM measurement_records ORDER BY room_name",
@@ -128,7 +128,7 @@ class Repository:
 
     @staticmethod
     def get_indicators() -> List[Dict[str, str]]:
-        """获取所有指标名称"""
+        # 获取所有指标名称
         engine = get_engine()
         df = pd.read_sql(
             "SELECT DISTINCT indicator_name, indicator_cn, unit "
@@ -139,7 +139,7 @@ class Repository:
 
     @staticmethod
     def get_measurement_count(sheet_name: str = None) -> int:
-        """获取记录总数"""
+        # 获取记录总数
         session_obj = get_session()
         try:
             q = session_obj.query(MeasurementRecord)
@@ -151,7 +151,7 @@ class Repository:
 
     @staticmethod
     def get_columns_with_data() -> List[str]:
-        """获取 measurement_records 中有数据的列名"""
+        # 获取 measurement_records 中有数据的列名
         skip_cols = {"id", "import_session_id", "created_at"}
         engine = get_engine()
         df = pd.read_sql("SELECT * FROM measurement_records LIMIT 1", con=engine)
@@ -163,7 +163,7 @@ class Repository:
     # ================================================================
     @staticmethod
     def count_measurements() -> int:
-        """统计 measurement_records 当前记录数。"""
+        # 统计 measurement_records 当前记录数。
         session_obj = get_session()
         try:
             return session_obj.query(MeasurementRecord).count()
@@ -172,10 +172,10 @@ class Repository:
 
     @staticmethod
     def clear_measurements() -> int:
-        """清空 measurement_records 表，返回清空前的记录数。
-
-        只清空测量数据本身；import_sessions / cleaning_log 等辅助表保持不变。
-        """
+        # 清空 measurement_records 表，返回清空前的记录数。
+        #
+        # 只清空测量数据本身；import_sessions / cleaning_log 等辅助表保持不变。
+        #
         engine = get_engine()
         n = Repository.count_measurements()
         with engine.begin() as conn:
@@ -189,7 +189,7 @@ class Repository:
     def log_cleaning_action(record_id: int, step_name: str, method_used: str,
                             column_affected: str = None, old_value: str = None,
                             new_value: str = None):
-        """记录清洗操作"""
+        # 记录清洗操作
         session_obj = get_session()
         try:
             log = CleaningLog(

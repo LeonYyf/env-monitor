@@ -281,7 +281,7 @@ class EDAPage(QWidget):
         return pd.concat([df, volume[df.columns]], ignore_index=True)
 
     def _populate_rooms(self):
-        """填充房间下拉框（按当前所选数据表过滤后的房间）"""
+        # 填充房间下拉框（按当前所选数据表过滤后的房间）
         self.rooms = sorted(self.df["room_name"].dropna().unique().tolist())
         self.room_combo.blockSignals(True)
         self.room_combo.clear()

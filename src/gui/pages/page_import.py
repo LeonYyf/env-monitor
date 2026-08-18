@@ -165,7 +165,7 @@ class DropZone(QFrame):
         self.clear_btn.setVisible(True)
 
     def reset_to_empty(self):
-        """撤回已选文件，恢复到初始的空态"""
+        # 撤回已选文件，恢复到初始的空态
         self.stack.setCurrentIndex(0)
         self.setMinimumHeight(300)
         self.setMaximumHeight(16777215)   #恢复默认最大高度

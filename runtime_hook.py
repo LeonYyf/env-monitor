@@ -1,15 +1,15 @@
-"""
-PyInstaller 运行时钩子（--runtime-hook 指定）。
-
-作用：程序被 PyInstaller 打包成单文件 exe 后，所有代码会解压到一个
-临时目录（sys._MEIPASS），退出即删除。若不处理，config.py 里的
-BASE_DIR = Path(__file__).parent 会指向临时目录，导致数据库被建在
-临时目录里、每次打开都丢数据。
-
-本钩子在主程序运行前执行，直接改写 config 模块的属性，把数据目录
-改到 exe 所在目录。图表中文字体已由 src/fonts.py 的 setup_chinese_font()
-统一自动探测，无需在此处理。全程不改动任何源码。
-"""
+#
+# PyInstaller 运行时钩子（--runtime-hook 指定）。
+#
+# 作用：程序被 PyInstaller 打包成单文件 exe 后，所有代码会解压到一个
+# 临时目录（sys._MEIPASS），退出即删除。若不处理，config.py 里的
+# BASE_DIR = Path(__file__).parent 会指向临时目录，导致数据库被建在
+# 临时目录里、每次打开都丢数据。
+#
+# 本钩子在主程序运行前执行，直接改写 config 模块的属性，把数据目录
+# 改到 exe 所在目录。图表中文字体已由 src/fonts.py 的 setup_chinese_font()
+# 统一自动探测，无需在此处理。全程不改动任何源码。
+#
 
 import sys
 from pathlib import Path

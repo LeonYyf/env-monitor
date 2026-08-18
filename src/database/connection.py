@@ -1,8 +1,8 @@
-"""
-数据库连接管理模块
-提供 SQLAlchemy 引擎和会话工厂。
-数据存储使用 SQLite 单文件数据库，无需安装 MySQL。
-"""
+#
+# 数据库连接管理模块
+# 提供 SQLAlchemy 引擎和会话工厂。
+# 数据存储使用 SQLite 单文件数据库，无需安装 MySQL。
+#
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -16,7 +16,7 @@ _SessionLocal = None
 
 
 def get_engine():
-    """获取数据库引擎（单例模式），首次调用时自动建表。"""
+    # 获取数据库引擎（单例模式），首次调用时自动建表。
     global _engine
     if _engine is None:
         db_url = config.get_db_url()
@@ -33,7 +33,7 @@ def get_engine():
 
 
 def get_session() -> Session:
-    """获取一个新的数据库会话"""
+    # 获取一个新的数据库会话
     global _SessionLocal
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(bind=get_engine())

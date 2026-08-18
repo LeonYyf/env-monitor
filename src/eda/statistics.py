@@ -1,6 +1,6 @@
-"""
-探索性数据分析 — 统计描述模块
-"""
+#
+# 探索性数据分析 — 统计描述模块
+#
 
 import pandas as pd
 import numpy as np
@@ -8,12 +8,12 @@ from scipy import stats as sp_stats
 
 
 def compute_statistics(df: pd.DataFrame, columns: list = None) -> pd.DataFrame:
-    """
-    计算所有数值列的统计描述
-
-    返回字段：计数、均值、标准差、最小值、Q1、中位数、Q3、最大值、
-             偏度、峰度、缺失数、缺失率
-    """
+    #
+    # 计算所有数值列的统计描述
+    #
+    # 返回字段：计数、均值、标准差、最小值、Q1、中位数、Q3、最大值、
+    # 偏度、峰度、缺失数、缺失率
+    #
     if columns is None:
         columns = df.select_dtypes(include=[np.number]).columns.tolist()
 
@@ -67,7 +67,7 @@ def compute_statistics(df: pd.DataFrame, columns: list = None) -> pd.DataFrame:
 
 
 def compute_correlation_matrix(df: pd.DataFrame, columns: list = None) -> pd.DataFrame:
-    """计算相关系数矩阵（Pearson）"""
+    # 计算相关系数矩阵（Pearson）
     if columns is None:
         columns = df.select_dtypes(include=[np.number]).columns.tolist()
     return df[columns].corr(method="pearson")
@@ -75,10 +75,10 @@ def compute_correlation_matrix(df: pd.DataFrame, columns: list = None) -> pd.Dat
 
 def compare_groups(df: pd.DataFrame, value_column: str,
                    group_column: str = "location") -> dict:
-    """
-    按分组比较变量（如：实验室 vs 生产车间）
-    返回: {分组名: {均值, 标准差, ...}}
-    """
+    #
+    # 按分组比较变量（如：实验室 vs 生产车间）
+    # 返回: {分组名: {均值, 标准差, ...}}
+    #
     if group_column not in df.columns:
         return {}
 

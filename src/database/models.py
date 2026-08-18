@@ -1,7 +1,7 @@
-"""
-SQLAlchemy ORM 模型定义
-映射到 SQLite 中的 3 张表。
-"""
+#
+# SQLAlchemy ORM 模型定义
+# 映射到 SQLite 中的 3 张表。
+#
 from sqlalchemy import (
     Column, Integer, String, Float, Date, DateTime, Text, JSON,
     ForeignKey, Index
@@ -13,7 +13,7 @@ Base = declarative_base()
 
 
 class ImportSession(Base):
-    """Excel 导入批次记录"""
+    # Excel 导入批次记录
     __tablename__ = "import_sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -31,7 +31,7 @@ class ImportSession(Base):
 
 
 class MeasurementRecord(Base):
-    """核心测量数据 — 长格式，适应任意指标"""
+    # 核心测量数据 — 长格式，适应任意指标
     __tablename__ = "measurement_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -60,7 +60,7 @@ class MeasurementRecord(Base):
 
 
 class CleaningLog(Base):
-    """数据清洗操作日志"""
+    # 数据清洗操作日志
     __tablename__ = "cleaning_log"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

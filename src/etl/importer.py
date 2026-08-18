@@ -1,7 +1,7 @@
-"""
-数据导入模块
-将 ExcelReader 解析后的长格式 DataFrame 逐条写入数据库。
-"""
+#
+# 数据导入模块
+# 将 ExcelReader 解析后的长格式 DataFrame 逐条写入数据库。
+#
 
 from typing import Dict, List, Optional, Callable
 from pathlib import Path
@@ -13,13 +13,13 @@ from src.database.repository import Repository
 
 
 class Importer:
-    """数据导入器 — 长格式 DataFrame → 数据库"""
+    # 数据导入器 — 长格式 DataFrame → 数据库
 
     def __init__(self, progress_callback: Callable = None):
-        """
-        progress_callback(percent: int, message: str)
-        用于 GUI 进度更新，可选。
-        """
+        #
+        # progress_callback(percent: int, message: str)
+        # 用于 GUI 进度更新，可选。
+        #
         self.progress = progress_callback or (lambda p, m: None)
 
     def import_sheet(
@@ -29,19 +29,19 @@ class Importer:
         file_hash: str,
         sheet_name: str,
     ) -> int:
-        """
-        将一个 sheet 的长格式 DataFrame 导入数据库。
-
-        参数:
-            df: ExcelReader 解析后的长格式 DataFrame
-                必须包含: record_date, room_name, indicator_name, value
-                可选: room_adjacent, particle_size, indicator_cn, unit
-            file_name: 源文件名
-            file_hash: 文件 SHA-256
-            sheet_name: Excel 工作表名
-
-        返回: 导入的记录数
-        """
+        #
+        # 将一个 sheet 的长格式 DataFrame 导入数据库。
+        #
+        # 参数:
+        # df: ExcelReader 解析后的长格式 DataFrame
+        # 必须包含: record_date, room_name, indicator_name, value
+        # 可选: room_adjacent, particle_size, indicator_cn, unit
+        # file_name: 源文件名
+        # file_hash: 文件 SHA-256
+        # sheet_name: Excel 工作表名
+        #
+        # 返回: 导入的记录数
+        #
         self.progress(0, f"正在准备导入「{sheet_name}」...")
 
         # 1. 创建导入批次记录
@@ -103,15 +103,15 @@ class Importer:
         sheets_data: Dict[str, pd.DataFrame],
         file_path: str,
     ) -> Dict[str, int]:
-        """
-        导入所有 sheet 的数据。
-
-        参数:
-            sheets_data: {sheet_name: DataFrame} 来自 ExcelReader.read_all_sheets()
-            file_path: Excel 文件的完整路径
-
-        返回: {sheet_name: record_count}
-        """
+        #
+        # 导入所有 sheet 的数据。
+        #
+        # 参数:
+        # sheets_data: {sheet_name: DataFrame} 来自 ExcelReader.read_all_sheets()
+        # file_path: Excel 文件的完整路径
+        #
+        # 返回: {sheet_name: record_count}
+        #
         # 计算文件哈希
         sha = hashlib.sha256()
         with open(file_path, "rb") as f:
@@ -144,6 +144,6 @@ class Importer:
 
 
 def check_duplicate_import(file_path: str) -> bool:
-    """检查文件是否已经导入过（按 SHA-256 哈希）"""
+    # 检查文件是否已经导入过（按 SHA-256 哈希）
     # 暂时简化实现，后续可完善
     return False
