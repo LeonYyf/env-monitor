@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
-from src.gui.chart_canvas import FixedAspectCanvas
+from src.gui.chart_canvas import AdaptiveCanvas
 from src.data_store import data_store
 from src.fonts import setup_chinese_font
 
@@ -159,7 +159,6 @@ class EDAPage(QWidget):
         self.chart_combo = QComboBox()
         self.chart_combo.addItems([
             "送风量 vs 换气次数（双轴）",
-            "直方图（分布）",
             "箱线图（指标对比）",
             "时间序列（趋势）",
             "相关性热力图",
@@ -467,7 +466,7 @@ class EDAPage(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "生成失败", f"生成图表时出错：{e}")
                 return
-            self._show_tab(FixedAspectCanvas(fig), room)
+            self._show_tab(AdaptiveCanvas(fig), room)
             self._chart_generated = True
             self.result_hint.setText(f"图表：{chart_type} · 房间：{room}")
             return
@@ -485,16 +484,14 @@ class EDAPage(QWidget):
 
         self._clear_result_tabs()
         try:
-            if chart_type == "直方图（分布）":
-                fig = self._room_histogram(room, wide, available)
-            elif chart_type == "箱线图（指标对比）":
+            if chart_type == "箱线图（指标对比）":
                 fig = self._room_boxplot(room, wide, available)
             elif chart_type == "时间序列（趋势）":
                 fig = self._room_timeseries(room, wide, available)
             else:  #相关性热力图
                 fig = self._room_heatmap(room, wide, available)
 
-            self._show_tab(FixedAspectCanvas(fig), room)
+            self._show_tab(AdaptiveCanvas(fig), room)
             self._chart_generated = True
             self.result_hint.setText(f"图表：{chart_type} · 房间：{room}（{len(available)} 个变量）")
         except Exception as e:
@@ -508,21 +505,6 @@ class EDAPage(QWidget):
             values="value", aggfunc="mean"
         ).sort_index()
         return wide
-
-    def _room_histogram(self, room, wide, indicators):
-        #一个房间内各所选变量的分布直方图
-        n = len(indicators)
-        fig, axes = plt.subplots(1, n, figsize=(5 * n, 4.5), dpi=100, constrained_layout=True)
-        if n == 1:
-            axes = [axes]
-        for ax, ind in zip(axes, indicators):
-            series = wide[ind].dropna()
-            ax.hist(series, bins=30, color="#0F766E", edgecolor="white", alpha=0.7)
-            ax.set_title(ind, fontweight="bold")
-            ax.set_xlabel(ind)
-            ax.set_ylabel("频次")
-        fig.suptitle(f"{room} · 分布直方图", fontsize=14, fontweight="bold")
-        return fig
 
     def _room_boxplot(self, room, wide, indicators):
         #一个房间内各所选变量的箱线图对比
@@ -555,11 +537,14 @@ class EDAPage(QWidget):
         ax.set_title(f"{room} · 时间序列趋势", fontsize=14, fontweight="bold")
         ax.legend()
         ax.grid(True, alpha=0.3)
-        #检测日期不多时逐个标出，确保每个检测月份（含最晚的月份）都清晰可见
-        if len(wide.index) <= 12:
-            ax.set_xticks(wide.index)
-            ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
-        plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
+
+        #x 轴日期刻度：自动定位 + 简洁格式，限制刻度数量，避免日期标签重叠（叠字）
+        locator = mdates.AutoDateLocator(minticks=3, maxticks=max(3, min(len(wide.index), 10)))
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+
+        #旋转日期标签并自动调整下边距，防止标签被裁切
+        fig.autofmt_xdate(rotation=45, ha="right")
         return fig
 
     def _room_heatmap(self, room, wide, indicators):
