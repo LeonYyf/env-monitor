@@ -1,0 +1,30 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # 也可在 GitHub 网页上手动点「Run workflow」
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: 打包成单文件 exe
+        run: pyinstaller --onefile --windowed --name EnvMonitor --runtime-hook runtime_hook.py --hidden-import sqlalchemy.dialects.sqlite main.py
+
+      - name: 上传 exe 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnvMonitor-windows
+          path: dist/EnvMonitor.exe

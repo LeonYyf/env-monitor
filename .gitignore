@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+
+# Data files
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Output
+output/charts/*
+output/reports/*
+!output/charts/.gitkeep
+!output/reports/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with passwords
+config_local.py
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 打包产物
+build/
+dist/
+
+# 运行时数据（含数据库，不提交）
+data/
+
+# Claude Code 工具文件（不属于应用源码）
+.Rhistory
+.agents/
+.claude/
