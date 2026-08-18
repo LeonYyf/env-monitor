@@ -15,7 +15,7 @@
 
 ### 方式一：Windows 单文件 exe（推荐，无需安装 Python）
 
-1. 打开 <https://github.com/LeonYyf/env-monitor/releases/latest>
+1. 打开 <https://github.com/yangyufeng64-gif/env-monitor/releases/latest>
 2. 下载 `EnvMonitor.exe`
 3. 双击运行即可
 
