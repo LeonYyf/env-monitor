@@ -127,7 +127,7 @@ def compute_room_volume(df: pd.DataFrame):
             diff = v - normal_avg
             abs_diff = abs(diff)
             rel_diff = abs_diff / normal_avg if normal_avg else 0.0
-            # 双阈值：绝对偏差超 5 m³ 且 相对偏差超 5% 才算异常
+            # 相对偏差超 5% 才算异常
             if rel_diff <= VOLUME_DEVIATION_RATIO:
                 continue  # 正常
 
@@ -147,7 +147,7 @@ def compute_room_volume(df: pd.DataFrame):
                 "房间": room,
                 "体积(m³)": round(v, 1),
                 "正常平均值(m³)": round(normal_avg, 1),
-                "偏差(m³)": round(diff, 1),
+                "偏差(%)": round(rel_diff*100, 1),
                 "方向": direction,
                 "判定/可能原因": cause,
             })

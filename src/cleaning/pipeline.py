@@ -117,7 +117,7 @@ class CleaningPipeline:
                 return {"status": "clean", "message": "未检测到异常值（IQR方法），此步骤可跳过",
                         "outlier_table": None, "outlier_count": 0}
             return {"status": "found", "message":
-                    f"检测到 {total_outliers} 个异常值（分布在 {len(outlier_info)} 列）",
+                    f"检测到 {total_outliers} 个异常值（分布在 {len(outlier_info)} 个房间×指标组合）",
                     "outlier_table": outlier_info, "outlier_count": int(total_outliers)}
 
         elif step_key == "timeformat":

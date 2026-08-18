@@ -38,11 +38,21 @@ def _available_font_names():
     return {f.name for f in font_manager.fontManager.ttflist}
 
 
+# 子串兜底：某些系统（尤其 Windows 打包后的 exe）里字体名会带变体后缀，
+# 例如「Microsoft YaHei UI」，精确名匹配不到。按这些关键词做一次子串匹配。
+_CJK_KEYWORDS = [
+    "YaHei", "微软雅黑", "雅黑", "SimHei", "PingFang", "Hiragino",
+    "Songti", "Heiti", "KaiTi", "WenQuanYi", "Noto Sans CJK",
+    "JhengHei", "黑体", "宋体",
+]
+
+
 def setup_chinese_font():
     """把 matplotlib 全局字体设为系统里能找到的中文字体。
 
-    先按当前平台候选找，找不到再扫一遍所有平台候选兜底。
-    返回选中的字体名；若一个中文字体都找不到返回 None（此时中文仍会乱码）。
+    先按当前平台候选精确匹配，找不到再扫一遍所有平台候选，
+    最后用子串关键词兜底。返回选中的字体名；若一个中文字体都
+    找不到返回 None（此时中文仍会乱码）。
     """
     # 当前平台候选优先，其余平台候选接在后面兜底
     candidates = list(_CJK_FONTS.get(platform.system(), []))
@@ -55,6 +65,14 @@ def setup_chinese_font():
 
     available = _available_font_names()
     chosen = next((name for name in candidates if name in available), None)
+
+    # 精确名没匹配上时，按关键词做子串匹配兜底
+    if chosen is None:
+        for kw in _CJK_KEYWORDS:
+            hit = next((name for name in available if kw.lower() in name.lower()), None)
+            if hit:
+                chosen = hit
+                break
 
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = (

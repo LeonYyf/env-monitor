@@ -341,7 +341,7 @@ class ReportingPage(QWidget):
             else:
                 lines.append(
                     f"共 {len(bad)} 个房间存在换气异常（体积与正常平均值相差同时超过 "
-                    f"{VOLUME_DEVIATION_M3:.0f} m³ 和 {VOLUME_DEVIATION_RATIO * 100:.0f}%）："
+                    f"{VOLUME_DEVIATION_RATIO * 100:.0f}%）："
                 )
                 for _, r in bad.iterrows():
                     lines.append(f"  - {r['房间']}：{r['异常次数']} 次异常")

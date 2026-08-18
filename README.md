@@ -4,58 +4,42 @@
 
 ## 功能流程
 
-1. **数据导入** — 读取 Excel（尘埃粒子、风量两个表）
-2. **数据清洗** — 缺失值 / 异常值 / 时间格式 / 去重
-3. **探索分析** — 统计描述 + 可视化图表
+1. **数据导入** — 读取 Excel（尘埃粒子、风量两个表），导入后直接提示进入清洗
+2. **数据清洗** — 缺失值 / 异常值 / 时间格式 / 去重（异常值按「房间 × 指标」分组判定，互不干扰）
+3. **探索分析** — 统计描述 + 可视化图表（中文字体自动适配）
 4. **结果报告** — 尘埃粒子合规性判定、房间体积一致性检查、自动业务解读、导出 Excel
 
-## 环境要求
+> 数据在内存中一路传递：导入 → 清洗 → 分析 → 报告，页面切换时自动加载，无需手动点「加载数据」。
 
-- **Python 3.11 或 3.12**（推荐，最稳定）
+## 安装 / 使用
+
+### 方式一：Windows 单文件 exe（推荐，无需安装 Python）
+
+1. 打开 <https://github.com/LeonYyf/env-monitor/releases/latest>
+2. 下载 `EnvMonitor.exe`
+3. 双击运行即可
+
+> 首次运行稍慢属正常；若被 Windows 安全中心拦截，点「更多信息 → 仍要运行」。
+
+### 方式二：源码运行（开发者 / macOS）
+
+**环境要求**
+
+- Python 3.11 或 3.12（推荐，最稳定）
 - 操作系统：Windows / macOS 均可
 
-## 安装步骤
+**步骤**
 
-### 1. 安装 Python
-
-**Windows：**
-
-1. 打开 <https://www.python.org/downloads/>，下载 Python 3.11 或 3.12 的安装包
-2. 双击运行安装器，**务必勾选 "Add Python to PATH"**（在安装窗口底部）
-3. 一路下一步完成安装
-
-**macOS：**
-
-```bash
-brew install python@3.12
-```
-
-或者同样去 python.org 下载安装包。
-
-### 2. 安装依赖库
-
-打开终端（Windows 用「命令提示符」或 PowerShell），进入本项目文件夹，执行：
-
-```bash
-pip install -r requirements.txt
-```
-
-> 如果提示 `pip` 找不到，改用 `python -m pip install -r requirements.txt`。
-
-### 3. 运行程序
-
-在本项目文件夹内执行：
-
-```bash
-python main.py
-```
+1. 安装 Python：Windows 打开 <https://www.python.org/downloads/> 下载 3.11/3.12，安装时**务必勾选 "Add Python to PATH"**；macOS 可 `brew install python@3.12`
+2. 安装依赖：在本项目文件夹执行 `pip install -r requirements.txt`（若提示 `pip` 找不到，改用 `python -m pip install -r requirements.txt`）
+3. 运行：在本项目文件夹执行 `python main.py`
 
 数据库会自动创建，无需额外配置。
 
 ## 使用说明
 
 1. 进入「数据导入」，选择 Excel 文件，预览并导入
-2. 进入「数据清洗」，按向导完成清洗
+2. 导入完成后按提示直接进入「数据清洗」，按向导完成清洗
 3. 进入「探索分析」，查看统计与图表
 4. 进入「结果报告」，选择洁净级别，生成报告并可导出 Excel
 
@@ -63,7 +47,7 @@ python main.py
 
 ### 图表里中文显示成方块（□□）
 
-程序默认使用 macOS 字体绘制图表。若在 Windows 上图表中文显示异常，需要把 `config.py` 中 `VIZ_DEFAULTS` 里的 `"font_family"` 改为 Windows 自带的字体，例如 `"Microsoft YaHei"`。
+程序会**自动探测**系统里的中文字体（macOS 用苹方/黑体，Windows 用微软雅黑/黑体），无需手动改任何配置。若仍有乱码，通常是旧程序没有重启：**完全关闭程序后重新运行**即可。
 
 ### 提示 `python` 不是内部或外部命令
 
