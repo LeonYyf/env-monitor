@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QHeaderView, QInputDialog,
     QComboBox, QTabWidget, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
 
 import config
@@ -127,7 +127,8 @@ class ReportingPage(QWidget):
         self.exceed_table.setMinimumHeight(170)
 
         # 环比变化 tab：相邻时段尘埃粒子数增长/下降，超阈值标红
-        growth_container = QWidget()
+        self.growth_container = QWidget()
+        growth_container = self.growth_container
         growth_layout = QVBoxLayout(growth_container)
         growth_layout.setContentsMargins(8, 8, 8, 8)
         growth_bar = QHBoxLayout()
@@ -149,7 +150,6 @@ class ReportingPage(QWidget):
         self.comp_tabs.addTab(self.compliance_table, "判定汇总")
         self.comp_tabs.addTab(self.exceed_table, "超标明细")
         self.comp_tabs.addTab(growth_container, "环比变化")
-        self.comp_tabs.tabBarClicked.connect(self._on_comp_tab_clicked)
         comp_layout.addWidget(self.comp_tabs)
         layout.addWidget(comp_group)
 
@@ -319,14 +319,8 @@ class ReportingPage(QWidget):
                     item.setToolTip(tooltip)
                 table.setItem(i, j, item)
 
-    # —— 环比变化：点「环比变化」tab 时弹窗问阈值 ——
-    def _on_comp_tab_clicked(self, index: int):
-        # tab 顺序：0=判定汇总 1=超标明细 2=环比变化
-        if index == 2:
-            # 等 tab 切换完成后再弹窗：若在 tabBarClicked 里立刻弹模态框，
-            # 会吞掉后续「鼠标松开」事件，导致 tab 切不过去、表格显示不出来。
-            QTimer.singleShot(0, self._ask_growth_threshold)
-
+    # —— 环比变化：点「设置标红阈值」按钮时弹窗问阈值（不挂在 tab 点击上，避免
+    #     模态弹窗打断 tab 切换导致「进不去」） ——
     def _ask_growth_threshold(self):
         # 无环比数据时（未生成报告或没有尘埃粒子数据）不弹窗
         if self.growth_df is None or self.growth_df.empty:
@@ -341,12 +335,14 @@ class ReportingPage(QWidget):
             self._fill_growth_table()
 
     def _growth_cell_text(self, col: str, val) -> str:
-        # 上期值/变化率为空（首个时段）显示「—」
+        # 上期值为空（首个时段）显示「—」；变化率首个时段已记为 0%，显示「0%」
         if pd.isna(val):
             return "—"
         if col == "变化率(%)":
             v = float(val)
-            return f"{v:+.1f}%" if v >= 0 else f"{v:.1f}%"
+            if v == 0:
+                return "0%"
+            return f"+{v:.1f}%" if v > 0 else f"{v:.1f}%"
         if col in ("本期值", "上期值"):
             return str(int(round(float(val))))
         return str(val)

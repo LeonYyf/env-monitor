@@ -4,6 +4,7 @@ import config
 
 VOLUME_DEVIATION_RATIO = 0.05   # 相对阈值：同时相差超过 5%（两者都超才判异常，避免大车间误报）
 VOLUME_INPUT_ERROR_RATIO = 9.0  # 异常值 > 9 倍正常平均值 → 疑似人工输入数据错误
+VOLUME_LOW_INPUT_ERROR_RATIO = 0.15  # 体积低于正常平均值 15%（即比正常低 85% 以上）→ 疑似人工输入错误
 
 
 def _fmt_date(d):
@@ -78,7 +79,7 @@ def compute_period_growth(df: pd.DataFrame):
 
     每个「房间 × 粒径」按监测日期排序，计算每个时段相对上一时段的
     增长/下降百分比：(本期值 − 上期值) ÷ 上期值 × 100%。
-    首个时段没有上一时段，变化率记为 NaN（前端显示为「—」）。
+    首个时段没有上一时段，变化率记为 0%（表示无变化，作为基准）。
     """
     particle_cn = list(config.PARTICLE_LIMITS.keys())
     particle = df[df["indicator_cn"].isin(particle_cn)]
@@ -107,7 +108,7 @@ def compute_period_growth(df: pd.DataFrame):
                     "日期": _fmt_date(dates[i]),
                     "本期值": round(cur),
                     "上期值": float("nan"),
-                    "变化率(%)": float("nan"),
+                    "变化率(%)": 0.0,   # 首个时段无上一时段，环比记为 0%
                 })
             else:
                 prev = float(vals[i - 1])
@@ -195,7 +196,10 @@ def compute_room_volume(df: pd.DataFrame):
                 else:
                     cause = "疑似过度清洁/过度耗电：可能风机频率开太高，或回风阀堵塞"
             else:
-                cause = "疑似过滤器阻力变大/堵塞、风管系统漏风，或风机频率调得低"
+                if v < VOLUME_LOW_INPUT_ERROR_RATIO * normal_avg:
+                    cause = "疑似人工输入错误（体积低于正常85%以上）"
+                else:
+                    cause = "疑似过滤器阻力变大/堵塞、风管系统漏风，或风机频率调得低"
 
             anomaly_rows.append({
                 "日期": _fmt_date(r.get("record_date")),
