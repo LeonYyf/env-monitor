@@ -2,16 +2,17 @@ import pandas as pd
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QTableWidget, QTableWidgetItem, QTextEdit,
-    QFileDialog, QMessageBox, QHeaderView,
+    QFileDialog, QMessageBox, QHeaderView, QInputDialog,
     QComboBox, QTabWidget, QScrollArea, QFrame,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
 
 import config
 from src.data_store import data_store
 from src.reporting.analysis import (
-    compute_compliance, compute_room_volume, VOLUME_DEVIATION_RATIO,
+    compute_compliance, compute_room_volume, compute_period_growth,
+    VOLUME_DEVIATION_RATIO,
 )
 from src.reporting.exporter import export_to_excel
 
@@ -24,6 +25,8 @@ class ReportingPage(QWidget):
         self.compliance_exceed = None       #超标明细
         self.volume_summary = None          #房间体积一致性：房间汇总
         self.volume_anomaly = None          #房间体积一致性：异常明细
+        self.growth_df = None               #尘埃粒子：逐时段环比变化
+        self.growth_threshold = 50.0        #环比增长超过该百分比(%)才标红
         self._red_dot = None                #红色小圆点图标（懒加载缓存）
         self._build_ui()
 
@@ -34,6 +37,8 @@ class ReportingPage(QWidget):
         self.compliance_exceed = None
         self.volume_summary = None
         self.volume_anomaly = None
+        self.growth_df = None
+        self.growth_threshold = 50.0
         self.data_status.setText("尚未加载")
         self.data_status.setStyleSheet("color: #A8A29E;")
         self.load_btn.setEnabled(True)
@@ -44,6 +49,9 @@ class ReportingPage(QWidget):
                   self.volume_table, self.volume_anomaly_table):
             t.setRowCount(0)
             t.setColumnCount(0)
+        self.growth_table.setRowCount(0)
+        self.growth_table.setColumnCount(0)
+        self.growth_threshold_label.setText("标红阈值：未设置")
         #熄灭 tab 上的红点
         self._set_tab_badge(self.comp_tabs, 1, "超标明细", False)
         self._set_tab_badge(self.vol_tabs, 1, "异常明细", False)
@@ -117,8 +125,31 @@ class ReportingPage(QWidget):
         self.exceed_table = QTableWidget()
         self.exceed_table.setAlternatingRowColors(True)
         self.exceed_table.setMinimumHeight(170)
+
+        # 环比变化 tab：相邻时段尘埃粒子数增长/下降，超阈值标红
+        growth_container = QWidget()
+        growth_layout = QVBoxLayout(growth_container)
+        growth_layout.setContentsMargins(8, 8, 8, 8)
+        growth_bar = QHBoxLayout()
+        growth_bar.addWidget(QLabel("相邻时段尘埃粒子数环比变化："))
+        self.growth_threshold_label = QLabel("标红阈值：未设置")
+        self.growth_threshold_label.setStyleSheet("color: #DC2626; font-weight: 600;")
+        growth_bar.addWidget(self.growth_threshold_label)
+        self.growth_btn = QPushButton("设置标红阈值(%)")
+        self.growth_btn.setObjectName("secondaryBtn")
+        self.growth_btn.clicked.connect(self._ask_growth_threshold)
+        growth_bar.addWidget(self.growth_btn)
+        growth_bar.addStretch()
+        growth_layout.addLayout(growth_bar)
+        self.growth_table = QTableWidget()
+        self.growth_table.setAlternatingRowColors(True)
+        self.growth_table.setMinimumHeight(170)
+        growth_layout.addWidget(self.growth_table)
+
         self.comp_tabs.addTab(self.compliance_table, "判定汇总")
         self.comp_tabs.addTab(self.exceed_table, "超标明细")
+        self.comp_tabs.addTab(growth_container, "环比变化")
+        self.comp_tabs.tabBarClicked.connect(self._on_comp_tab_clicked)
         comp_layout.addWidget(self.comp_tabs)
         layout.addWidget(comp_group)
 
@@ -189,9 +220,10 @@ class ReportingPage(QWidget):
 
         cls = self.class_combo.currentText()
 
-        #两个判定（后端纯函数）
+        #两个判定（后端纯函数）+ 尘埃粒子逐时段环比变化
         self.compliance_summary, self.compliance_exceed = compute_compliance(self.df, cls)
         self.volume_summary, self.volume_anomaly = compute_room_volume(self.df)
+        self.growth_df = compute_period_growth(self.df)
 
         #悬浮提示：合规性——超标明细按 (房间, 粒径) 分组
         comp_tips = {}
@@ -235,6 +267,8 @@ class ReportingPage(QWidget):
             self.vol_tabs, 1, "异常明细",
             self.volume_anomaly is not None and not self.volume_anomaly.empty,
         )
+
+        self._fill_growth_table()
 
         self._auto_interpret()
         self.export_btn.setEnabled(True)
@@ -285,6 +319,71 @@ class ReportingPage(QWidget):
                     item.setToolTip(tooltip)
                 table.setItem(i, j, item)
 
+    # —— 环比变化：点「环比变化」tab 时弹窗问阈值 ——
+    def _on_comp_tab_clicked(self, index: int):
+        # tab 顺序：0=判定汇总 1=超标明细 2=环比变化
+        if index == 2:
+            # 等 tab 切换完成后再弹窗：若在 tabBarClicked 里立刻弹模态框，
+            # 会吞掉后续「鼠标松开」事件，导致 tab 切不过去、表格显示不出来。
+            QTimer.singleShot(0, self._ask_growth_threshold)
+
+    def _ask_growth_threshold(self):
+        # 无环比数据时（未生成报告或没有尘埃粒子数据）不弹窗
+        if self.growth_df is None or self.growth_df.empty:
+            return
+        threshold, ok = QInputDialog.getDouble(
+            self, "设置标红阈值",
+            "相邻时段尘埃粒子环比增长超过多少（%）需要标红？",
+            self.growth_threshold, 0.0, 100000.0, 1,
+        )
+        if ok:
+            self.growth_threshold = threshold
+            self._fill_growth_table()
+
+    def _growth_cell_text(self, col: str, val) -> str:
+        # 上期值/变化率为空（首个时段）显示「—」
+        if pd.isna(val):
+            return "—"
+        if col == "变化率(%)":
+            v = float(val)
+            return f"{v:+.1f}%" if v >= 0 else f"{v:.1f}%"
+        if col in ("本期值", "上期值"):
+            return str(int(round(float(val))))
+        return str(val)
+
+    def _fill_growth_table(self):
+        self.growth_threshold_label.setText(
+            f"标红阈值：环比增长 > {self.growth_threshold:g}%"
+        )
+        table = self.growth_table
+        table.setRowCount(0)
+        table.setColumnCount(0)
+
+        if self.growth_df is None or self.growth_df.empty:
+            return
+
+        cols = list(self.growth_df.columns)
+        table.setRowCount(len(self.growth_df))
+        table.setColumnCount(len(cols))
+        table.setHorizontalHeaderLabels(cols)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        table.horizontalHeader().setStretchLastSection(True)
+
+        for i, (_, row) in enumerate(self.growth_df.iterrows()):
+            rate = row.get("变化率(%)")
+            # 只有环比增长超过阈值才标红（下降、首时段 NaN 都不标红）
+            is_spike = (rate == rate) and (float(rate) > self.growth_threshold)
+            for j, col in enumerate(cols):
+                item = QTableWidgetItem(self._growth_cell_text(col, row[col]))
+                if is_spike:
+                    item.setForeground(QColor("#DC2626"))
+                    item.setBackground(QColor("#FEE2E2"))
+                    if col == "变化率(%)":
+                        f = item.font()
+                        f.setBold(True)
+                        item.setFont(f)
+                table.setItem(i, j, item)
+
     def _set_tab_badge(self, tab_widget: QTabWidget, index: int,
                        base_text: str, has_bad: bool):
         #有异常时给 tab 加红色小圆点图标，无异常时去掉
@@ -327,6 +426,30 @@ class ReportingPage(QWidget):
                     )
         else:
             lines.append("未检测到尘埃粒子数据。")
+
+        # 尘埃粒子逐时段环比变化
+        if self.growth_df is not None and not self.growth_df.empty:
+            spike = self.growth_df[
+                self.growth_df["变化率(%)"].notna()
+                & (self.growth_df["变化率(%)"] > self.growth_threshold)
+            ]
+            lines.append("")
+            lines.append("尘埃粒子逐时段环比变化：")
+            if spike.empty:
+                lines.append(
+                    f"各时段环比增长均未超过 {self.growth_threshold:g}%，"
+                    "未发现相邻时段粒子数暴增。"
+                )
+            else:
+                lines.append(
+                    f"共 {len(spike)} 个时段环比增长超过 {self.growth_threshold:g}%"
+                    "（已在表格中标红），请重点核查："
+                )
+                for _, s in spike.iterrows():
+                    lines.append(
+                        f"  - {s['房间']} · {s['粒径']} · {s['日期']}："
+                        f"本期 {int(s['本期值'])}，环比 {float(s['变化率(%)']):+.1f}%"
+                    )
 
         # —— 板块二：体积一致性 ——
         lines.append("")
@@ -384,6 +507,8 @@ class ReportingPage(QWidget):
                 sections["体积房间汇总"] = self.volume_summary
             if self.volume_anomaly is not None and not self.volume_anomaly.empty:
                 sections["体积异常明细"] = self.volume_anomaly
+            if self.growth_df is not None and not self.growth_df.empty:
+                sections["尘埃粒子环比变化"] = self.growth_df
             sections["业务解读"] = self.interp_text.toPlainText()
 
             export_to_excel(sections, file_path)

@@ -73,6 +73,61 @@ def compute_compliance(df: pd.DataFrame, cleanroom_class: str):
     return summary, exceed
 
 
+def compute_period_growth(df: pd.DataFrame):
+    """尘埃粒子逐时段环比变化。
+
+    每个「房间 × 粒径」按监测日期排序，计算每个时段相对上一时段的
+    增长/下降百分比：(本期值 − 上期值) ÷ 上期值 × 100%。
+    首个时段没有上一时段，变化率记为 NaN（前端显示为「—」）。
+    """
+    particle_cn = list(config.PARTICLE_LIMITS.keys())
+    particle = df[df["indicator_cn"].isin(particle_cn)]
+    if particle.empty:
+        return pd.DataFrame()
+
+    # 同一「房间 × 粒径 × 日期」可能有多条记录，取均值作为该时段水平
+    daily = (
+        particle
+        .groupby(["room_name", "indicator_cn", "record_date"], as_index=False)["value"]
+        .mean()
+    )
+
+    rows = []
+    for (room, size), sub in daily.groupby(["room_name", "indicator_cn"]):
+        sub = sub.sort_values("record_date")
+        vals = sub["value"].astype(float).tolist()
+        dates = sub["record_date"].tolist()
+
+        for i in range(len(sub)):
+            cur = float(vals[i])
+            if i == 0:
+                rows.append({
+                    "房间": room,
+                    "粒径": size,
+                    "日期": _fmt_date(dates[i]),
+                    "本期值": round(cur),
+                    "上期值": float("nan"),
+                    "变化率(%)": float("nan"),
+                })
+            else:
+                prev = float(vals[i - 1])
+                # 上一时段为 0 时百分比无意义，记 NaN（前端显示「—」）
+                rate = (cur - prev) / prev * 100 if prev else float("nan")
+                rows.append({
+                    "房间": room,
+                    "粒径": size,
+                    "日期": _fmt_date(dates[i]),
+                    "本期值": round(cur),
+                    "上期值": round(prev),
+                    "变化率(%)": round(rate, 1) if rate == rate else float("nan"),
+                })
+
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result = result.sort_values(["房间", "粒径", "日期"]).reset_index(drop=True)
+    return result
+
+
 def compute_room_volume(df: pd.DataFrame):
     flow = df[df["indicator_cn"].isin(["送风量", "换气次数"])]
     if flow.empty:
