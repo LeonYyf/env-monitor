@@ -49,8 +49,9 @@ class ReportingPage(QWidget):
                   self.volume_table, self.volume_anomaly_table):
             t.setRowCount(0)
             t.setColumnCount(0)
-        self.growth_table.setRowCount(0)
-        self.growth_table.setColumnCount(0)
+        for t in self.growth_tables.values():
+            t.setRowCount(0)
+            t.setColumnCount(0)
         self.growth_threshold_label.setText("标红阈值：未设置")
         #熄灭 tab 上的红点
         self._set_tab_badge(self.comp_tabs, 1, "超标明细", False)
@@ -142,10 +143,16 @@ class ReportingPage(QWidget):
         growth_bar.addWidget(self.growth_btn)
         growth_bar.addStretch()
         growth_layout.addLayout(growth_bar)
-        self.growth_table = QTableWidget()
-        self.growth_table.setAlternatingRowColors(True)
-        self.growth_table.setMinimumHeight(170)
-        growth_layout.addWidget(self.growth_table)
+        # 按粒径拆两个子表：纵轴=房间，横轴=监测日期，单元格=环比变化率(%)
+        self.growth_subtabs = QTabWidget()
+        self.growth_tables = {}  # 粒径 -> QTableWidget
+        for cn in config.PARTICLE_LIMITS.keys():
+            t = QTableWidget()
+            t.setAlternatingRowColors(True)
+            t.setMinimumHeight(170)
+            self.growth_subtabs.addTab(t, cn)
+            self.growth_tables[cn] = t
+        growth_layout.addWidget(self.growth_subtabs)
 
         self.comp_tabs.addTab(self.compliance_table, "判定汇总")
         self.comp_tabs.addTab(self.exceed_table, "超标明细")
@@ -351,34 +358,43 @@ class ReportingPage(QWidget):
         self.growth_threshold_label.setText(
             f"标红阈值：环比增长 > {self.growth_threshold:g}%"
         )
-        table = self.growth_table
-        table.setRowCount(0)
-        table.setColumnCount(0)
+        for t in self.growth_tables.values():
+            t.setRowCount(0)
+            t.setColumnCount(0)
 
         if self.growth_df is None or self.growth_df.empty:
             return
 
-        cols = list(self.growth_df.columns)
-        table.setRowCount(len(self.growth_df))
-        table.setColumnCount(len(cols))
-        table.setHorizontalHeaderLabels(cols)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        table.horizontalHeader().setStretchLastSection(True)
+        for cn, table in self.growth_tables.items():
+            sub = self.growth_df[self.growth_df["粒径"] == cn]
+            if sub.empty:
+                continue
+            # 透视：纵轴=房间，横轴=监测日期，单元格=环比变化率(%)
+            mat = sub.pivot_table(index="房间", columns="日期",
+                                  values="变化率(%)", aggfunc="first")
+            date_cols = sorted(mat.columns)   # 日期已统一成 %Y-%m-%d，字典序即时间序
+            mat = mat.reindex(columns=date_cols).sort_index()
 
-        for i, (_, row) in enumerate(self.growth_df.iterrows()):
-            rate = row.get("变化率(%)")
-            # 只有环比增长超过阈值才标红（下降、首时段 NaN 都不标红）
-            is_spike = (rate == rate) and (float(rate) > self.growth_threshold)
-            for j, col in enumerate(cols):
-                item = QTableWidgetItem(self._growth_cell_text(col, row[col]))
-                if is_spike:
-                    item.setForeground(QColor("#DC2626"))
-                    item.setBackground(QColor("#FEE2E2"))
-                    if col == "变化率(%)":
-                        f = item.font()
+            cols = ["房间"] + date_cols
+            table.setRowCount(len(mat))
+            table.setColumnCount(len(cols))
+            table.setHorizontalHeaderLabels(cols)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            table.horizontalHeader().setStretchLastSection(True)
+
+            for i, room in enumerate(mat.index):
+                table.setItem(i, 0, QTableWidgetItem(str(room)))
+                for j, d in enumerate(mat.columns):
+                    val = mat.iloc[i, j]
+                    cell = QTableWidgetItem(self._growth_cell_text("变化率(%)", val))
+                    # 只有环比增长超过阈值才标红（下降、首时段 0%、空值不标红）
+                    if pd.notna(val) and float(val) > self.growth_threshold:
+                        cell.setForeground(QColor("#DC2626"))
+                        cell.setBackground(QColor("#FEE2E2"))
+                        f = cell.font()
                         f.setBold(True)
-                        item.setFont(f)
-                table.setItem(i, j, item)
+                        cell.setFont(f)
+                    table.setItem(i, j + 1, cell)
 
     def _set_tab_badge(self, tab_widget: QTabWidget, index: int,
                        base_text: str, has_bad: bool):
