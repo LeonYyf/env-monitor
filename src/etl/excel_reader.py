@@ -74,12 +74,13 @@ class ExcelReader:
 
             if "尘埃粒子" in sheet:
                 results[sheet] = self._parse_particle(raw)
-            elif "风量" in sheet:
+            elif "风量" in sheet or "换气次数" in sheet:
                 results[sheet] = self._parse_airflow(raw)
+            elif "浮游菌" in sheet:
+                results[sheet] = self._parse_bacteria(raw)
             else:
-                # 未知格式 → 尝试当作普通表读取
-                raw = pd.read_excel(self.xl, sheet_name=sheet)
-                results[sheet] = raw
+                # 其余 sheet 本轮不识别，直接跳过，不影响程序运行
+                continue
 
         return results
 
@@ -127,9 +128,13 @@ class ExcelReader:
         date_part = date_str.str.extract(r'(\d{4}\.\d{1,2}\.\d{1,2})')[0]
         df['record_date'] = pd.to_datetime(date_part, errors='coerce')
 
-        # 提取粒径部分: "0.5µm" 或 "5µm"（兼容 um/µm 两种写法）
-        size_part = date_str.str.extract(r'(0\.5µm|5µm|0\.5um|5um)')[0]
+        # 提取粒径部分: "0.5µm" / "1µm" / "5µm"（兼容 um/µm 两种写法）
+        size_part = date_str.str.extract(r'(0\.5µm|1µm|5µm|0\.5um|1um|5um)')[0]
         df['particle_size'] = size_part.str.replace('um', 'µm', regex=False)
+
+        # 跳过「标准」行与空行：这些行第一列不是日期，record_date 解析为 NaT，
+        # 直接剔除，只保留含合法日期的数据行（标准行不参与分析）。
+        df = df[df['record_date'].notna()].copy()
 
         # WIDE → LONG：把每个房间列变成行
         id_vars = ['record_date', 'particle_size']
@@ -146,10 +151,12 @@ class ExcelReader:
         # 映射 indicator_name
         long["indicator_name"] = long["particle_size"].map({
             "0.5µm": "particle_05um",
+            "1µm": "particle_1um",
             "5µm": "particle_5um",
         })
         long["indicator_cn"] = long["particle_size"].map({
             "0.5µm": "0.5µm尘埃粒子",
+            "1µm": "1µm尘埃粒子",
             "5µm": "5µm尘埃粒子",
         })
         long["unit"] = "个/m³"
@@ -283,6 +290,90 @@ class ExcelReader:
         # 删除空值和辅助列
         result = long.dropna(subset=["value"]).copy()
         result = result[[
+            "record_date", "room_name", "room_adjacent", "particle_size",
+            "indicator_name", "indicator_cn", "value", "unit"
+        ]]
+
+        return result
+
+    # ----------------------------------------------------------------
+    # 浮游菌 Sheet 解析
+    # ----------------------------------------------------------------
+    def _parse_bacteria(self, raw: pd.DataFrame) -> pd.DataFrame:
+        #
+        # 输入（水平重复格式，与「风量」表类似）：
+        # Row 0: 日期 | 监测区域 | 标准 | 采样量 | 菌落数×3 | 平均浓度 | 日期 | 菌落数×3 | 平均浓度 | ... (重复多组)
+        # Row 1: 空行
+        # Row 2+: 2026.1.4 | 微生物实验室 | ≤100个/m³ | 500L | 1 | 2 | 1 | 2.667 | 2026.2.23 | ...
+        #
+        # 解析方式：按表头文字（日期 / 监测区域 / 平均浓度）定位各列，
+        # 第 g 组 = 第 g 个「日期」列 + 第 g 个「平均浓度」列。
+        # 「标准」「采样量」「菌落数」列不参与分析，直接忽略。
+        #
+        # 输出（LONG 格式，只保留平均浓度一个指标）：
+        # record_date | room_name | indicator_name          | value | unit
+        # 2026-01-04  | 微生物实验室 | bacteria_concentration | 2.667 | 个/m³
+        #
+        headers = [str(c).strip() if pd.notna(c) else "" for c in raw.iloc[0].values]
+        data = raw.iloc[2:].copy()   # 第 0 行表头、第 1 行空行，数据从第 2 行起
+
+        # 按表头文字定位各列（不依赖固定顺序）
+        def _col_indices(name: str, exact: bool = False) -> List[int]:
+            if exact:
+                return [i for i, h in enumerate(headers) if h == name]
+            return [i for i, h in enumerate(headers) if name in h]
+
+        room_idx = _col_indices("监测区域")
+        date_idx = _col_indices("日期", exact=True)
+        avg_idx = _col_indices("平均浓度")
+
+        if not room_idx:
+            raise ValueError("浮游菌表未找到「监测区域」列，无法解析")
+        room_col = room_idx[0]
+
+        n_groups = len(avg_idx)
+        if n_groups == 0:
+            raise ValueError("浮游菌表未找到「平均浓度」列，无法解析")
+        if len(date_idx) != n_groups:
+            raise ValueError(
+                f"浮游菌表列数量不匹配：日期 {len(date_idx)} 列、"
+                f"平均浓度 {len(avg_idx)} 列，二者数量应一致。"
+            )
+
+        # 丢弃没有房间名的行（组装车间纵向合并产生的空行、底部公式说明行）
+        data = data[data.iloc[:, room_col].notna()].copy()
+        data.iloc[:, room_col] = data.iloc[:, room_col].astype(str).str.strip()
+
+        # 日期是纵向合并单元格（只在每组首行有值），向下填充
+        for c in date_idx:
+            data.iloc[:, c] = data.iloc[:, c].ffill()
+
+        frames = []
+        # 第 g 组 = 第 g 个「日期」列 + 第 g 个「平均浓度」列
+        for g in range(n_groups):
+            subset = pd.DataFrame({
+                "room_name": data.iloc[:, room_col],
+                "date_str": data.iloc[:, date_idx[g]].astype(str).str.strip(),
+                "value": data.iloc[:, avg_idx[g]],
+            })
+
+            subset["record_date"] = pd.to_datetime(subset["date_str"], errors="coerce")
+            subset["value"] = pd.to_numeric(subset["value"], errors="coerce")
+            subset = subset.dropna(subset=["record_date", "value"])
+            frames.append(subset)
+
+        if not frames:
+            return pd.DataFrame()
+
+        combined = pd.concat(frames, ignore_index=True)
+
+        combined["room_adjacent"] = None
+        combined["particle_size"] = None
+        combined["indicator_name"] = "bacteria_concentration"
+        combined["indicator_cn"] = "浮游菌平均浓度"
+        combined["unit"] = "个/m³"
+
+        result = combined[[
             "record_date", "room_name", "room_adjacent", "particle_size",
             "indicator_name", "indicator_cn", "value", "unit"
         ]]

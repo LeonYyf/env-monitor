@@ -33,9 +33,14 @@ jobs:
           name: EnvMonitor-windows
           path: dist/EnvMonitor.exe
 
-      # 直接从 GitHub 的 CI 服务器把 exe 挂到 Release v1.0.0，
+      # 直接从 GitHub 的 CI 服务器把 exe 挂到 Release v2.0.1，
       # 避免在本地网络上传大文件时被「Connection reset」中断。
-      - name: 发布到 Release v1.0.0
+      # Release 不存在则自动创建（生成发布说明），存在则跳过创建、直接上传资产。
+      - name: 发布到 Release v2.0.1
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload v1.0.0 dist/EnvMonitor.exe --clobber
+        run: |
+          gh release view v2.0.1 >/dev/null 2>&1 || \
+            gh release create v2.0.1 --generate-notes --title "v2.0.1"
+          gh release upload v2.0.1 dist/EnvMonitor.exe --clobber

@@ -266,7 +266,7 @@ class ImportPage(QWidget):
         header.addStretch(1)
         layout.addLayout(header)
 
-        desc = QLabel("把洁净车间环境监测 Excel 文件拖进来（可一次多个），系统会自动识别「尘埃粒子」和「风量」Sheet。")
+        desc = QLabel("把洁净车间环境监测 Excel 文件拖进来（可一次多个），系统会自动识别「尘埃粒子」「风量/换气次数」「浮游菌」Sheet。")
         desc.setObjectName("pageDescription")
         layout.addWidget(desc)
 

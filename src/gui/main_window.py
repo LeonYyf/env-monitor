@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.sidebar)
 
         # 底部版本信息
-        version_label = QLabel("v1.0.0")
+        version_label = QLabel("v2.0.1")
         version_label.setStyleSheet(
             f"color: {COLORS['sidebar_text_muted']}; font-size: 11px; padding: 12px; "
             f"background-color: {COLORS['sidebar_bg']}; border: none;"

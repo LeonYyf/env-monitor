@@ -40,7 +40,7 @@ class MeasurementRecord(Base):
     record_date = Column(Date, nullable=False, comment="测量日期")
     room_name = Column(String(100), nullable=False, comment="房间名称")
     room_adjacent = Column(String(50), comment="相邻区域")
-    particle_size = Column(String(10), comment="粒径（0.5µm / 5µm）")
+    particle_size = Column(String(10), comment="粒径（0.5µm / 1µm / 5µm）")
     indicator_name = Column(String(100), nullable=False, comment="指标英文字段名")
     indicator_cn = Column(String(100), comment="指标中文名")
     value = Column(Float, nullable=False, comment="数值")

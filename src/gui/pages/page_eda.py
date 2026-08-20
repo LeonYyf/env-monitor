@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 
 from src.gui.chart_canvas import AdaptiveCanvas
 from src.data_store import data_store
@@ -54,7 +53,7 @@ class EDAPage(QWidget):
         title.setObjectName("pageTitle")
         layout.addWidget(title)
 
-        desc = QLabel("统计描述 + 可视化图表。左侧选择变量与房间，右侧查看该房间的图表（超出国标限值的粒子浓度会红色标记）。")
+        desc = QLabel("统计描述 + 可视化图表。左侧选择变量与房间，右侧查看该房间的图表。")
         desc.setObjectName("pageDescription")
         layout.addWidget(desc)
 
@@ -140,11 +139,6 @@ class EDAPage(QWidget):
         #统计分析
         stats_group = QGroupBox("统计分析")
         stats_layout = QVBoxLayout(stats_group)
-        stats_layout.addWidget(QLabel("洁净级别（粒子国标）："))
-        self.class_combo = QComboBox()
-        self.class_combo.addItems(config.CLEANROOM_CLASSES)
-        self.class_combo.setCurrentText(config.DEFAULT_CLEANROOM_CLASS)
-        stats_layout.addWidget(self.class_combo)
         self.run_stats_btn = QPushButton("生成统计描述")
         self.run_stats_btn.setObjectName("primaryBtn")
         self.run_stats_btn.setEnabled(False)
@@ -377,15 +371,14 @@ class EDAPage(QWidget):
         if not indicators:
             QMessageBox.warning(self, "提示", "请先选择变量。")
             return
-        cls = self.class_combo.currentText()
-        stats_df = self._compute_stats(indicators, cls)
+        stats_df = self._compute_stats(indicators)
         if stats_df.empty:
             QMessageBox.warning(self, "提示", "所选变量没有可用数据。")
             return
         self._show_stats_table(stats_df)
-        self.result_hint.setText(f"统计描述 · {len(indicators)} 个指标 · 洁净级别：{cls}")
+        self.result_hint.setText(f"统计描述 · {len(indicators)} 个指标")
 
-    def _compute_stats(self, indicators, cls) -> pd.DataFrame:
+    def _compute_stats(self, indicators) -> pd.DataFrame:
         results = []
         for ind in indicators:
             sub = self.df[self.df["indicator_cn"] == ind]["value"].dropna()
@@ -407,20 +400,6 @@ class EDAPage(QWidget):
                 "最大值": round(sub.max(), 2),
                 "单位": unit,
             }
-
-            #粒子指标：对比国标限值
-            limit = config.PARTICLE_LIMITS.get(ind, {}).get(cls)
-            if limit is not None:
-                exceed = int((sub > limit).sum())
-                row["国标限值"] = limit
-                row["超标数"] = exceed
-                row["超标率"] = f"{exceed / n * 100:.1f}%"
-                row["是否超标"] = "是" if exceed > 0 else "否"
-            else:
-                row["国标限值"] = "—"
-                row["超标数"] = "—"
-                row["超标率"] = "—"
-                row["是否超标"] = "—"
             results.append(row)
         return pd.DataFrame(results)
 
@@ -435,12 +414,8 @@ class EDAPage(QWidget):
         table.setAlternatingRowColors(True)
 
         for i, (_, row) in enumerate(stats_df.iterrows()):
-            is_exceed = row.get("是否超标") == "是"
             for j, col in enumerate(cols):
                 item = QTableWidgetItem(str(row[col]))
-                if is_exceed and col in ("最大值", "是否超标"):
-                    item.setForeground(QColor("#DC2626"))
-                    item.setBackground(QColor("#FEE2E2"))
                 table.setItem(i, j, item)
 
         self._show_tab(table, "统计描述")
@@ -524,12 +499,16 @@ class EDAPage(QWidget):
         #一个房间内各所选变量随时间的变化趋势
         fig, ax = plt.subplots(figsize=(11, 6), dpi=100, constrained_layout=True)
         for ind in indicators:
-            series = wide[ind]
-            ax.plot(wide.index, series,
+            # 每个变量只在自己有监测值的日期上有点；不同变量的监测日期可能
+            # 完全不同（尘埃粒子/送风量/浮游菌各测各的）。若直接用带空值的
+            # series 绘图，中间的空值会把同一变量的折线打断成孤点，导致相邻
+            # 两点之间没有连线。先去空值，再按日期连线。
+            series = wide[ind].dropna()
+            ax.plot(series.index, series.values,
                     marker="o", markersize=3, linewidth=1.5, label=ind)
             #在每个点上标注具体数值：各月数值相差大时，低值会被高值压到底部，
             #不标数字很难看清每个月的检测结果
-            for d, v in series.dropna().items():
+            for d, v in series.items():
                 ax.annotate(f"{v:,.0f}", (d, v), textcoords="offset points",
                             xytext=(0, 6), ha="center", fontsize=8, color="#57534E")
         ax.set_xlabel("日期", labelpad=12)
@@ -551,14 +530,42 @@ class EDAPage(QWidget):
         #一个房间内各变量之间的相关性热力图
         if len(indicators) < 2:
             raise ValueError("相关性热力图至少需要选择 2 个变量")
-        corr = wide[indicators].corr()
+        # 不同指标的监测日期常错开几天（如实验区 2 月 22/23 差一天）。若要求
+        # 严格同一天才能算相关系数，很多组合会因日期错开而变 NaN。这里先把
+        # 相差 ≤15 天的日期近似为同一期（同簇取均值）再算相关性。
+        aligned = self._align_dates_for_correlation(wide)
+        corr = aligned[indicators].corr()
+        # 仍算不出的组合（相差超过 15 天、无重叠数据）是 NaN，用「—」显式标出。
+        annot = corr.map(lambda v: "—" if pd.isna(v) else f"{v:.2f}")
+        # 配色时 NaN 无法参与，先填 0（对应中性色）只用于渲染颜色，数值仍按上面显示「—」。
+        plot_corr = corr.fillna(0.0)
         fig, ax = plt.subplots(figsize=(9, 7), dpi=100, constrained_layout=True)
-        mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
-        sns.heatmap(corr, mask=mask, annot=True, fmt=".2f", cmap="RdYlBu_r",
+        mask = np.triu(np.ones_like(plot_corr, dtype=bool), k=1)
+        sns.heatmap(plot_corr, mask=mask, annot=annot, fmt="", cmap="RdYlBu_r",
                     center=0, square=True, linewidths=0.5, vmin=-1, vmax=1, ax=ax,
                     cbar_kws={"shrink": 0.8, "label": "Pearson 相关系数"})
-        ax.set_title(f"{room} · 变量相关性热力图", fontsize=14, fontweight="bold", pad=12)
+        ax.set_title(f"{room} · 变量相关性热力图\n（日期相差 ≤15 天已近似为同一期；「—」= 无重叠数据，无法计算）",
+                     fontsize=13, fontweight="bold", pad=12)
         return fig
+
+    def _align_dates_for_correlation(self, wide, tol_days=15):
+        #把宽表的日期索引按「相差 ≤ tol_days 天」贪心聚类，同簇取均值。
+        #目的：让监测日期略有错开的两个变量对齐到同一期，从而算出相关系数，
+        #而不是因为差一两天就变成 NaN。相距超过容差的日期仍各算各的。
+        if len(wide.index) <= 1:
+            return wide
+        dates = sorted(wide.index)   # Timestamp 列表，按时间排序
+        clusters = []
+        for d in dates:
+            if clusters and (d - clusters[-1][0]).days <= tol_days:
+                clusters[-1].append(d)
+            else:
+                clusters.append([d])
+        # 每簇用最早日期作代表，保持时间顺序
+        rep = {d: c[0] for c in clusters for d in c}
+        aligned = wide.copy()
+        aligned.index = pd.DatetimeIndex([rep[d] for d in wide.index])
+        return aligned.groupby(level=0).mean().sort_index()
 
     def _room_dual_axis(self, room, wide):
         #送风量与换气次数的双轴折线图
